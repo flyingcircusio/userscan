@@ -1,0 +1,9 @@
+[package]
+name = "guardix"
+version = "0.1.0"
+authors = ["Christian Kauhaus <kc@flyingcircus.io>"]
+description = "Searches for Nix store references and registers them with the GC"
+
+[dependencies]
+ignore = "0.2"
+clap = "2.22"
