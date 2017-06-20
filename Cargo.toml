@@ -1,9 +1,16 @@
 [package]
-name = "guardix"
+name = "fc-userscan"
 version = "0.1.0"
 authors = ["Christian Kauhaus <kc@flyingcircus.io>"]
 description = "Searches for Nix store references and registers them with the GC"
 
 [dependencies]
-ignore = "0.2"
+bytesize = "0.1"
 clap = "2.22"
+crossbeam = "0.2"
+error-chain = "0.10"
+ignore = "0.2"
+lazy_static = "0.2"
+memmap = "0.5"
+regex = "0.2"
+users = "0.5"
