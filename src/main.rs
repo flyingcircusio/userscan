@@ -1,4 +1,5 @@
 extern crate bytesize;
+extern crate env_logger;
 extern crate ignore;
 extern crate users;
 #[macro_use]
@@ -7,6 +8,8 @@ extern crate clap;
 extern crate error_chain;
 #[macro_use]
 extern crate lazy_static;
+#[macro_use]
+extern crate log;
 
 macro_rules! eprintln {
     ($($tt:tt)*) => {{
@@ -21,59 +24,58 @@ macro_rules! eprintln {
 }
 
 mod errors;
-mod scan;
-mod walk;
 mod output;
 mod registry;
+mod scan;
+mod walk;
 
 use bytesize::ByteSize;
+use output::Output;
 use clap::{Arg, App, ArgMatches};
 use errors::*;
-use registry::GCRoots;
-use std::path::PathBuf;
+use registry::{GCRoots, NullGCRoots, Register};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+static GC_PREFIX: &str = "/nix/var/nix/gcroots/profiles/per-user";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Args {
     startdir: PathBuf,
-    cache: PathBuf,
     give_up: ByteSize,
     list: bool,
-    verbose: bool,
-    debug: bool,
     register: bool,
+    output: Output,
 }
 
 impl Args {
     fn parallel_walker(&self) -> ignore::WalkParallel {
-        ignore::WalkBuilder::new(&self.startdir).hidden(false).build_parallel()
+        ignore::WalkBuilder::new(&self.startdir)
+            .hidden(false)
+            .git_global(false)
+            .git_ignore(false)
+            .git_exclude(false)
+            .build_parallel()
     }
 
     fn scanner(&self) -> scan::Scanner {
         scan::Scanner::new(self.give_up)
     }
 
-    fn gcroots(&self) -> Result<GCRoots> {
+    fn gcroots(&self) -> Result<Box<Register>> {
+        if !self.register {
+            return Ok(Box::new(NullGCRoots));
+        }
         let username = match users::get_current_username() {
             Some(u) => u,
-            _ => return Err("failed to query current user name".into())
+            _ => return Err("failed to query current user name".into()),
         };
-        GCRoots::new(&username, &self.startdir, self.verbose)
-            .chain_err(|| "Failed to create gcroots registry")
+        let gc = GCRoots::new(&Path::new(GC_PREFIX).join(&username))?;
+        Ok(Box::new(gc))
     }
-}
 
-impl Default for Args {
-    fn default() -> Self {
-        Args {
-            startdir: PathBuf::new(),
-            cache: PathBuf::new(),
-            give_up: ByteSize::mib(1),
-            list: false,
-            verbose: false,
-            debug: false,
-            register: false,
-        }
+    fn output(&self) -> &Output {
+        &self.output
     }
 }
 
@@ -81,11 +83,10 @@ impl<'a> From<ArgMatches<'a>> for Args {
     fn from(a: ArgMatches) -> Self {
         Args {
             startdir: a.value_of_os("DIRECTORY").unwrap_or_default().into(),
-            list: a.is_present("l"),
+            give_up: ByteSize::mib(1),
+            list: a.is_present("l") || a.is_present("R"),
             register: !a.is_present("R"),
-            verbose: a.is_present("v") || a.is_present("d"),
-            debug: a.is_present("d"),
-            ..Args::default()
+            output: Output::new(a.is_present("v"), a.is_present("d"), a.is_present("1")),
         }
     }
 }
@@ -98,10 +99,25 @@ fn parse_args() -> Args {
         .arg(Arg::with_name("DIRECTORY").required(true).help(
             "Start scan in DIRECTORY",
         ))
-        .arg(arg("l", "list", "Shows files containing Nix store references"))
-        .arg(arg("R", "no-register", "Don't register found references with the Nix GC"))
+        .arg(
+            arg("l", "list", "Shows files containing Nix store references").display_order(1),
+        )
+        .arg(arg(
+            "R",
+            "no-register",
+            "Don't register found references, implies --list",
+        ))
+        .arg(arg(
+            "1",
+            "oneline",
+            "Outputs each file with references on a single line",
+        ))
         .arg(arg("v", "verbose", "Additional output"))
-        .arg(arg("d", "debug", "Prints every file opened"))
+        .arg(arg(
+            "d",
+            "debug",
+            "Prints every file opened, implies --verbose",
+        ))
         .get_matches()
         .into()
 }
@@ -110,7 +126,7 @@ fn main() {
     let args = Arc::new(parse_args());
     match walk::run(args) {
         Err(ref err) => {
-            eprintln!("{}: ERROR: {}", crate_name!(), output::fmt_error_chain(err));
+            error!("{}", output::fmt_error_chain(err));
             std::process::exit(2)
         }
         Ok(exitcode) => std::process::exit(exitcode),

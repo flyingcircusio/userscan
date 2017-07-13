@@ -2,15 +2,23 @@
 name = "fc-userscan"
 version = "0.1.0"
 authors = ["Christian Kauhaus <kc@flyingcircus.io>"]
-description = "Searches for Nix store references and registers them with the GC"
+description = """\
+Searches for Nix store references and registers them with the Nix garbage
+collector.
+"""
 
 [dependencies]
 bytesize = "0.1"
 clap = "2.22"
 crossbeam = "0.2"
-error-chain = "0.10"
+env_logger = "0.4"
 ignore = "0.2"
 lazy_static = "0.2"
+log = "0.3"
 memmap = "0.5"
 regex = "0.2"
 users = "0.5"
+
+[dependencies.error-chain]
+version = "0.10"
+default-features = false

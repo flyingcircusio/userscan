@@ -13,7 +13,8 @@ pub struct Summary {
 
 impl FromIterator<StorePaths> for Summary {
     fn from_iter<T>(iter: T) -> Self
-        where T: IntoIterator<Item = ScanResult>
+    where
+        T: IntoIterator<Item = ScanResult>,
     {
         let mut res = Summary {
             nfiles: 0,
@@ -33,11 +34,13 @@ impl FromIterator<StorePaths> for Summary {
 
 impl fmt::Display for Summary {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f,
-               "{} files processed, {} warnings, {} read, {} store references",
-               self.nfiles,
-               self.nwarn,
-               self.read,
-               self.nrefs)
+        write!(
+            f,
+            "{} files processed, {} warnings, {} read, {} store references",
+            self.nfiles,
+            self.nwarn,
+            self.read,
+            self.nrefs
+        )
     }
 }

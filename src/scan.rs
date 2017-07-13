@@ -10,7 +10,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::fmt;
 use std::os::unix::prelude::*;
-use std::path::{Path, PathBuf, Display};
+use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 pub struct StorePaths {
@@ -19,12 +19,10 @@ pub struct StorePaths {
 }
 
 impl StorePaths {
-    #[allow(dead_code)]
-    pub fn path(&self) -> Display {
-        self.dent.path().display()
+    pub fn path(&self) -> &Path {
+        self.dent.path()
     }
 
-    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.refs.is_empty()
     }
@@ -71,7 +69,12 @@ lazy_static! {
 fn scan_regular(dent: &DirEntry) -> Result<Vec<PathBuf>> {
     let mmap = Mmap::open_path(dent.path(), Protection::Read)?;
     let buf: &[u8] = unsafe { mmap.as_slice() };
-    Ok(STORE_RE.captures_iter(&buf).map(|cap| OsStr::from_bytes(&cap[1]).into()).collect())
+    Ok(
+        STORE_RE
+            .captures_iter(&buf)
+            .map(|cap| OsStr::from_bytes(&cap[1]).into())
+            .collect(),
+    )
 }
 
 fn scan_symlink(dent: &DirEntry) -> Result<Vec<PathBuf>> {
