@@ -1,4 +1,5 @@
 extern crate bytesize;
+extern crate colored;
 extern crate env_logger;
 extern crate ignore;
 extern crate users;
@@ -51,10 +52,11 @@ pub struct Args {
 impl Args {
     fn parallel_walker(&self) -> ignore::WalkParallel {
         ignore::WalkBuilder::new(&self.startdir)
-            .hidden(false)
+            .git_exclude(false)
             .git_global(false)
             .git_ignore(false)
-            .git_exclude(false)
+            .hidden(false)
+            .parents(false)
             .build_parallel()
     }
 
@@ -70,7 +72,7 @@ impl Args {
             Some(u) => u,
             _ => return Err("failed to query current user name".into()),
         };
-        let gc = GCRoots::new(&Path::new(GC_PREFIX).join(&username))?;
+        let gc = GCRoots::new(&Path::new(GC_PREFIX).join(&username), &self.startdir)?;
         Ok(Box::new(gc))
     }
 
@@ -86,7 +88,12 @@ impl<'a> From<ArgMatches<'a>> for Args {
             give_up: ByteSize::mib(1),
             list: a.is_present("l") || a.is_present("R"),
             register: !a.is_present("R"),
-            output: Output::new(a.is_present("v"), a.is_present("d"), a.is_present("1")),
+            output: Output::new(
+                a.is_present("v"),
+                a.is_present("d"),
+                a.is_present("1"),
+                if a.is_present("C") { Some(true) } else { None },
+            ),
         }
     }
 }
@@ -102,16 +109,19 @@ fn parse_args() -> Args {
         .arg(
             arg("l", "list", "Shows files containing Nix store references").display_order(1),
         )
-        .arg(arg(
-            "R",
-            "no-register",
-            "Don't register found references, implies --list",
-        ))
+        .arg(
+            arg(
+                "R",
+                "no-register",
+                "Don't register found references, implies --list",
+            ).display_order(2),
+        )
         .arg(arg(
             "1",
             "oneline",
             "Outputs each file with references on a single line",
         ))
+        .arg(arg("C", "color", "Funky colorful output"))
         .arg(arg("v", "verbose", "Additional output"))
         .arg(arg(
             "d",

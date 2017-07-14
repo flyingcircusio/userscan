@@ -67,6 +67,11 @@ lazy_static! {
 }
 
 fn scan_regular(dent: &DirEntry) -> Result<Vec<PathBuf>> {
+    if dent.metadata()?.len() < 45 {
+        // minimum length to fit a single store reference not reached
+        return Ok(Vec::new());
+    }
+    debug!("Scanning {}", dent.path().display());
     let mmap = Mmap::open_path(dent.path(), Protection::Read)?;
     let buf: &[u8] = unsafe { mmap.as_slice() };
     Ok(
@@ -79,6 +84,7 @@ fn scan_regular(dent: &DirEntry) -> Result<Vec<PathBuf>> {
 
 fn scan_symlink(dent: &DirEntry) -> Result<Vec<PathBuf>> {
     let target = fs::read_link(dent.path())?;
+    debug!("Scanning {}", dent.path().display());
     if let Some(cap) = STORE_RE.captures(target.as_os_str().as_bytes()) {
         Ok(vec![OsStr::from_bytes(&cap[1]).into()])
     } else {
@@ -91,15 +97,11 @@ fn scan(dent: &DirEntry) -> Result<Vec<PathBuf>> {
         Some(ref e) if !e.is_partial() => return Ok(vec![]),
         _ => (),
     }
-    if let (Some(ft), Ok(meta)) = (dent.file_type(), dent.metadata()) {
-        match ft {
-            _ if ft.is_file() && meta.len() > 0 => scan_regular(dent),
-            _ if ft.is_symlink() => scan_symlink(dent),
-            _ => Ok(vec![]),
-        }.chain_err(|| format!("{}", dent.path().display()))
-    } else {
-        Err(format!("{}: stat() failed", dent.path().display()).into())
-    }
+    match dent.file_type() {
+        Some(ft) if ft.is_file() => scan_regular(dent),
+        Some(ft) if ft.is_symlink() => scan_symlink(dent),
+        _ => Ok(vec![]),
+    }.chain_err(|| format!("{}", dent.path().display()))
 }
 
 #[derive(Debug, Clone)]

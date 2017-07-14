@@ -8,8 +8,10 @@ collector.
 """
 
 [dependencies]
+atty = "0.2"
 bytesize = "0.1"
 clap = "2.22"
+colored = "1.5"
 crossbeam = "0.2"
 env_logger = "0.4"
 ignore = "0.2"

@@ -2,9 +2,9 @@ extern crate crossbeam;
 
 use errors::*;
 use ignore::{self, DirEntry, WalkState};
-use registry::GcRootsChan;
+use output::{Output, p2s};
+use registry::GcRootsTx;
 use scan::Scanner;
-use std::fs;
 use std::sync::{Arc, mpsc};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use super::Args;
@@ -13,10 +13,10 @@ fn process(
     dent: DirEntry,
     args: &Args,
     scanner: &Scanner,
+    output: &Output,
     softerrs: &AtomicUsize,
-    gc: &GcRootsChan,
+    gc: &GcRootsTx,
 ) -> Result<WalkState> {
-    debug!("Scanning {} ...", dent.path().display());
     let sp = scanner.find_paths(dent)?;
     if let Some(err) = sp.error() {
         warn!("{}", err);
@@ -26,15 +26,16 @@ fn process(
         let sp = Arc::new(sp);
         gc.send(sp.clone()).chain_err(|| ErrorKind::WalkAbort)?;
         if args.list {
-            println!("{}", sp)
+            output.print_store_paths(&sp)?
         }
     }
     Ok(WalkState::Continue)
 }
 
-fn walk(args: Arc<Args>, softerrs: Arc<AtomicUsize>, gc: GcRootsChan) {
+fn walk(args: Arc<Args>, softerrs: Arc<AtomicUsize>, gc: GcRootsTx) {
     args.parallel_walker().run(|| {
         let args = args.clone();
+        let output = args.output().clone();
         let scanner = args.scanner();
         let softerrs = softerrs.clone();
         let gc = gc.clone();
@@ -43,7 +44,9 @@ fn walk(args: Arc<Args>, softerrs: Arc<AtomicUsize>, gc: GcRootsChan) {
             ignore::Error,
         >| {
             res.map_err(From::from)
-                .and_then(|dent| process(dent, &args, &scanner, &softerrs, &gc))
+                .and_then(|dent| {
+                    process(dent, &args, &scanner, &output, &softerrs, &gc)
+                })
                 .unwrap_or_else(|err: Error| match err {
                     Error(ErrorKind::WalkAbort, _) => WalkState::Quit,
                     _ => {
@@ -57,20 +60,20 @@ fn walk(args: Arc<Args>, softerrs: Arc<AtomicUsize>, gc: GcRootsChan) {
 }
 
 pub fn run(args: Arc<Args>) -> Result<i32> {
-    fs::metadata(&args.startdir).chain_err(|| {
-        format!("cannot access start dir {}", args.startdir.display())
-    })?;
+    let startdir_abs = args.startdir.canonicalize().chain_err(
+        || format!("start dir {} not accessible", p2s(&args.startdir)))?;
     let softerrs = Arc::new(AtomicUsize::new(0));
     let mut gcroots = args.gcroots()?;
     let (gcroots_tx, gcroots_rx) = mpsc::channel();
+    info!("Scouting {}", p2s(&startdir_abs));
+
     crossbeam::scope(|scope| -> Result<_> {
         let softerrs = softerrs.clone();
         scope.spawn(move || walk(args, softerrs, gcroots_tx));
-        for sp in gcroots_rx {
-            gcroots.register(&sp)?;
-        }
-        Ok(())
+        gcroots.register_loop(gcroots_rx)
+        // FIXME statistics
     })?;
+
     let softerrs = softerrs.load(Ordering::SeqCst);
     if softerrs > 0 {
         warn!("{} soft errors", softerrs);
