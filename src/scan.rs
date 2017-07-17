@@ -31,6 +31,11 @@ impl StorePaths {
         self.dent.error()
     }
 
+    #[allow(dead_code)]
+    pub fn refs<'a>(&'a self) -> &'a [PathBuf] {
+        &self.refs
+    }
+
     pub fn iter_refs<'a>(&'a self) -> Box<Iterator<Item = &Path> + 'a> {
         Box::new(self.refs.iter().map(|p| p.as_path()))
     }
@@ -59,7 +64,7 @@ lazy_static! {
 const MIN_STOREREF_LEN: u64 = 45;
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Scanner {
     quickcheck: usize,
 }
@@ -76,8 +81,7 @@ impl Scanner {
             return Ok(Vec::new());
         }
         debug!("Scanning {}", dent.path().display());
-        let f = fs::File::open(dent.path())?;
-        let mmap = Mmap::open(&f, Protection::Read)?;
+        let mmap = Mmap::open_path(dent.path(), Protection::Read)?;
         let buf: &[u8] = unsafe { mmap.as_slice() };
         if len > self.quickcheck as u64 {
             if twoway::find_bytes(&buf[0..self.quickcheck], b"/nix/store/").is_none() {
@@ -86,8 +90,8 @@ impl Scanner {
         }
         Ok(
             STORE_RE
-                .captures_iter(&buf)
-                .map(|cap| OsStr::from_bytes(&cap[1]).into())
+                .find_iter(&buf)
+                .map(|match_| OsStr::from_bytes(match_.as_bytes()).into())
                 .collect(),
         )
     }
@@ -95,8 +99,8 @@ impl Scanner {
     fn scan_symlink(&self, dent: &DirEntry) -> Result<Vec<PathBuf>> {
         debug!("Scanning {}", dent.path().display());
         let target = fs::read_link(dent.path())?;
-        if target.starts_with("/nix/store/") {
-            Ok(vec![target.into()])
+        if let Some(match_) = STORE_RE.find(&target.as_os_str().as_bytes()) {
+            Ok(vec![OsStr::from_bytes(match_.as_bytes()).into()])
         } else {
             Ok(vec![])
         }

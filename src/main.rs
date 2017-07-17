@@ -12,18 +12,6 @@ extern crate lazy_static;
 #[macro_use]
 extern crate log;
 
-macro_rules! eprintln {
-    ($($tt:tt)*) => {{
-        use std::io::{BufWriter, Write};
-        let stderr = ::std::io::stderr();
-        let stderr = stderr.lock();
-        let mut stderr = BufWriter::new(stderr);
-        if let Err(_) = writeln!(stderr, $($tt)*) {
-            ::std::process::exit(32) // broken pipe
-        }
-    }}
-}
-
 mod errors;
 mod output;
 mod registry;

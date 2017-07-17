@@ -1,5 +1,5 @@
 [package]
-name = "fc-userscan"
+name = "userscan"
 version = "0.1.0"
 authors = ["Christian Kauhaus <kc@flyingcircus.io>"]
 description = """\

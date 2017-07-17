@@ -1,5 +1,5 @@
 [root]
-name = "fc-userscan"
+name = "userscan"
 version = "0.1.0"
 dependencies = [
  "atty 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
