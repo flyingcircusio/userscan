@@ -77,7 +77,7 @@ impl Output {
             sp.path().display(),
             if sp.is_empty() { "" } else { ":" }
         );
-        write!(w, "{}", filename.purple())?;
+        write!(w, "{}", filename.purple().bold())?;
         let sep = if self.oneline { " " } else { "\n" };
         for r in sp.iter_refs() {
             write!(w, "{}{}", sep, r.display())?

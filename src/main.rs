@@ -36,6 +36,7 @@ use clap::{Arg, App, ArgMatches};
 use errors::*;
 use registry::{GCRoots, NullGCRoots, Register};
 use std::path::{Path, PathBuf};
+use std::result;
 use std::sync::Arc;
 
 static GC_PREFIX: &str = "/nix/var/nix/gcroots/profiles/per-user";
@@ -43,7 +44,7 @@ static GC_PREFIX: &str = "/nix/var/nix/gcroots/profiles/per-user";
 #[derive(Debug, Clone, PartialEq)]
 pub struct Args {
     startdir: PathBuf,
-    give_up: ByteSize,
+    quickcheck: ByteSize,
     list: bool,
     register: bool,
     output: Output,
@@ -61,7 +62,7 @@ impl Args {
     }
 
     fn scanner(&self) -> scan::Scanner {
-        scan::Scanner::new(self.give_up)
+        scan::Scanner::new(self.quickcheck.as_usize())
     }
 
     fn gcroots(&self) -> Result<Box<Register>> {
@@ -85,7 +86,6 @@ impl<'a> From<ArgMatches<'a>> for Args {
     fn from(a: ArgMatches) -> Self {
         Args {
             startdir: a.value_of_os("DIRECTORY").unwrap_or_default().into(),
-            give_up: ByteSize::mib(1),
             list: a.is_present("l") || a.is_present("R"),
             register: !a.is_present("R"),
             output: Output::new(
@@ -94,12 +94,16 @@ impl<'a> From<ArgMatches<'a>> for Args {
                 a.is_present("1"),
                 if a.is_present("C") { Some(true) } else { None },
             ),
+            quickcheck: ByteSize::kib(a.value_of_lossy("q").unwrap().parse::<usize>().unwrap()),
         }
     }
 }
 
 fn parse_args() -> Args {
     let arg = |short, long, help| Arg::with_name(short).short(short).long(long).help(help);
+    let kb_val = |s: String| -> result::Result<(), String> {
+        s.parse::<u32>().map(|_| ()).map_err(|e| e.to_string())
+    };
     App::new(crate_name!())
         .version(crate_version!())
         .about(crate_description!())
@@ -128,6 +132,15 @@ fn parse_args() -> Args {
             "debug",
             "Prints every file opened, implies --verbose",
         ))
+        .arg(
+            arg(
+                "q",
+                "quickcheck",
+                "Give up if no Nix store reference is found in the first <q> kbytes of a file",
+            ).takes_value(true)
+                .default_value("64")
+                .validator(kb_val),
+        )
         .get_matches()
         .into()
 }

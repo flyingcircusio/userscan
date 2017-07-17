@@ -19,6 +19,7 @@ lazy_static = "0.2"
 log = "0.3"
 memmap = "0.5"
 regex = "0.2"
+twoway = "0.1"
 users = "0.5"
 
 [dependencies.error-chain]

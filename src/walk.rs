@@ -2,7 +2,7 @@ extern crate crossbeam;
 
 use errors::*;
 use ignore::{self, DirEntry, WalkState};
-use output::{Output, p2s};
+use output::{Output, p2s, fmt_error_chain};
 use registry::GcRootsTx;
 use scan::Scanner;
 use std::sync::{Arc, mpsc};
@@ -48,9 +48,10 @@ fn walk(args: Arc<Args>, softerrs: Arc<AtomicUsize>, gc: GcRootsTx) {
                     process(dent, &args, &scanner, &output, &softerrs, &gc)
                 })
                 .unwrap_or_else(|err: Error| match err {
+                    Error(ErrorKind::WalkContinue, _) => WalkState::Continue,
                     Error(ErrorKind::WalkAbort, _) => WalkState::Quit,
                     _ => {
-                        warn!("{}", err);
+                        warn!("{}", fmt_error_chain(&err));
                         softerrs.fetch_add(1, Ordering::SeqCst);
                         WalkState::Continue
                     }
@@ -60,8 +61,9 @@ fn walk(args: Arc<Args>, softerrs: Arc<AtomicUsize>, gc: GcRootsTx) {
 }
 
 pub fn run(args: Arc<Args>) -> Result<i32> {
-    let startdir_abs = args.startdir.canonicalize().chain_err(
-        || format!("start dir {} not accessible", p2s(&args.startdir)))?;
+    let startdir_abs = args.startdir.canonicalize().chain_err(|| {
+        format!("start dir {} not accessible", p2s(&args.startdir))
+    })?;
     let softerrs = Arc::new(AtomicUsize::new(0));
     let mut gcroots = args.gcroots()?;
     let (gcroots_tx, gcroots_rx) = mpsc::channel();

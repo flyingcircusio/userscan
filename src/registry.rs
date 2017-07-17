@@ -3,7 +3,7 @@ use errors::*;
 use ignore::{self, WalkBuilder, DirEntry};
 use output::p2s;
 use scan::StorePaths;
-use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::env;
 use std::ffi::OsStr;
 use std::fs;
@@ -36,7 +36,7 @@ pub struct GCRoots {
     prefix: PathBuf,
     topdir: PathBuf,
     cwd: PathBuf,
-    seen: BTreeSet<PathBuf>,
+    seen: HashSet<PathBuf>,
 }
 
 impl GCRoots {

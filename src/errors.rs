@@ -12,8 +12,13 @@ error_chain! {
 
     errors {
         WalkAbort {
-            description("abort walk")
-            display("abort walk due to an error condition")
+            description("internal: abort walk")
+            display("")
+        }
+
+        WalkContinue {
+            description("internal: skip this entry and continue")
+            display("")
         }
     }
 }
