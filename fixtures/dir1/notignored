@@ -1,0 +1,4 @@
+File name listed in .gitignore, but .gitignore should not be obeyed
+
+/nix/store/00n9gkswhqdgbhgs7lnz2ckqxphavjr8-ChasingBottoms-1.3.1.2.drv
+/nix/store/00y6xgsdpjx3fyz4v7k5lwivi28yqd9f-initrd-fsinfo.drv

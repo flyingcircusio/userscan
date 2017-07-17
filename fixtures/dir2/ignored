@@ -1,0 +1,12 @@
+Contains valid Nix store refs, but this file name is listed in .ignore
+
+/nix/store/00n9gkswhqdgbhgs7lnz2ckqxphavjr8-ChasingBottoms-1.3.1.2.drv
+/nix/store/00y6xgsdpjx3fyz4v7k5lwivi28yqd9f-initrd-fsinfo.drv
+/nix/store/00zncsd36zg37bymidhgqcarlfwf80gz-python3.4-requests-2.10.0.drv
+/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5
+/nix/store/019ix2amywwc14jk7fh462abl6y607ax-etc-file.drv
+/nix/store/01javy1gwy7ika2ygd0ww1m6xzxiyh5g-perl-HTML-Tagset-3.20.drv
+/nix/store/01llv9z7npk8wp7732r2h63rmr14d9xk-cryptonite-0.21.tar.gz.drv
+/nix/store/01pqbbz59b941bvwa1hf41p3v73plxy9-hamming-0.1.0.drv
+/nix/store/01qdsmv9gmlphxkwrisyxg9i6y9w1nrh-libX11-1.6.5.drv
+/nix/store/01rc2bq2s3dnvbrf0z8h23jxdw1brb10-nixos-install.drv
