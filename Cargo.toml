@@ -1,23 +1,24 @@
 [package]
-name = "userscan"
+name = "fc-userscan"
 version = "0.1.0"
 authors = ["Christian Kauhaus <kc@flyingcircus.io>"]
 description = """\
-Searches for Nix store references and registers them with the Nix garbage
+Searches for Nix store references and registers them with the Nix garbage \
 collector.
 """
 
 [dependencies]
 atty = "0.2"
 bytesize = "0.1"
-clap = "2.22"
-colored = "1.5"
+clap = "2"
+colored = "1"
 crossbeam = "0.2"
 env_logger = "0.4"
 ignore = "0.2"
 lazy_static = "0.2"
 log = "0.3"
 memmap = "0.5"
+nix = "0.9"
 regex = "0.2"
 twoway = "0.1"
 users = "0.5"
@@ -25,3 +26,6 @@ users = "0.5"
 [dependencies.error-chain]
 version = "0.10"
 default-features = false
+
+[dev-dependencies]
+tempdir = "0.3"

@@ -1,11 +1,8 @@
-extern crate atty;
-
 use colored::{self, Colorize, ColoredString};
 use env_logger::LogBuilder;
 use errors::*;
 use log::{LogLevel, LogLevelFilter, LogRecord};
 use scan::StorePaths;
-use self::atty::Stream;
 use std::io;
 use std::io::prelude::*;
 use std::path::Path;
@@ -21,13 +18,13 @@ pub fn fmt_error_chain(err: &Error) -> String {
 pub struct Output {
     level: LogLevelFilter,
     oneline: bool,
-    color: Option<bool>,
+    color: bool,
 }
 
 impl Output {
     fn log_init(self) -> Self {
-        if let Some(colorcontrol) = self.color {
-            colored::control::set_override(colorcontrol)
+        if self.color {
+            colored::control::set_override(true)
         }
         let fmt = |r: &LogRecord| match r.level() {
             LogLevel::Error => {
@@ -57,7 +54,7 @@ impl Output {
         self
     }
 
-    pub fn new(verbose: bool, debug: bool, oneline: bool, color: Option<bool>) -> Output {
+    pub fn new(verbose: bool, debug: bool, oneline: bool, color: bool) -> Output {
         Output {
             level: match (verbose, debug) {
                 (_, true) => LogLevelFilter::Debug,
@@ -65,9 +62,7 @@ impl Output {
                 _ => LogLevelFilter::Warn,
             },
             oneline: oneline,
-            color: color.or_else(|| {
-                Some(atty::is(Stream::Stdout) && atty::is(Stream::Stderr))
-            }),
+            color: color,
         }.log_init()
     }
 
@@ -91,6 +86,16 @@ impl Output {
         self.write_store_paths(&mut w, sp).chain_err(
             || ErrorKind::WalkAbort,
         )
+    }
+}
+
+impl Default for Output {
+    fn default() -> Self {
+        Output {
+            level: LogLevelFilter::Off,
+            oneline: false,
+            color: false,
+        }
     }
 }
 

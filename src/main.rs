@@ -1,3 +1,4 @@
+extern crate atty;
 extern crate bytesize;
 extern crate colored;
 extern crate env_logger;
@@ -18,14 +19,17 @@ mod registry;
 mod scan;
 mod walk;
 
+#[cfg(test)]
+mod tests;
+
+use atty::Stream;
 use bytesize::ByteSize;
-use output::Output;
 use clap::{Arg, App, ArgMatches};
 use errors::*;
+use output::Output;
 use registry::{GCRoots, NullGCRoots, Register};
 use std::path::{Path, PathBuf};
 use std::result;
-use std::sync::Arc;
 
 static GC_PREFIX: &str = "/nix/var/nix/gcroots/profiles/per-user";
 
@@ -39,14 +43,14 @@ pub struct Args {
 }
 
 impl Args {
-    fn parallel_walker(&self) -> ignore::WalkParallel {
-        ignore::WalkBuilder::new(&self.startdir)
-            .git_exclude(false)
+    fn walker(&self) -> ignore::WalkBuilder {
+        let mut wb = ignore::WalkBuilder::new(&self.startdir);
+        wb.git_exclude(false)
             .git_global(false)
             .git_ignore(false)
             .hidden(false)
-            .parents(false)
-            .build_parallel()
+            .parents(false);
+        wb
     }
 
     fn scanner(&self) -> scan::Scanner {
@@ -70,6 +74,19 @@ impl Args {
     }
 }
 
+impl Default for Args {
+    fn default() -> Self {
+        Args {
+            startdir: PathBuf::new(),
+            quickcheck: ByteSize::kib(64),
+            list: false,
+            register: false,
+            output: Output::default(),
+        }
+    }
+}
+
+
 impl<'a> From<ArgMatches<'a>> for Args {
     fn from(a: ArgMatches) -> Self {
         Args {
@@ -80,7 +97,7 @@ impl<'a> From<ArgMatches<'a>> for Args {
                 a.is_present("v"),
                 a.is_present("d"),
                 a.is_present("1"),
-                if a.is_present("C") { Some(true) } else { None },
+                a.is_present("C") || (atty::is(Stream::Stdout) && atty::is(Stream::Stderr)),
             ),
             quickcheck: ByteSize::kib(a.value_of_lossy("q").unwrap().parse::<usize>().unwrap()),
         }
@@ -134,8 +151,7 @@ fn parse_args() -> Args {
 }
 
 fn main() {
-    let args = Arc::new(parse_args());
-    match walk::run(args) {
+    match walk::run(parse_args()) {
         Err(ref err) => {
             error!("{}", output::fmt_error_chain(err));
             std::process::exit(2)

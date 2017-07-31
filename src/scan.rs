@@ -32,7 +32,7 @@ impl StorePaths {
     }
 
     #[allow(dead_code)]
-    pub fn refs<'a>(&'a self) -> &'a [PathBuf] {
+    pub fn refs(&self) -> &Vec<PathBuf> {
         &self.refs
     }
 
@@ -83,7 +83,7 @@ impl Scanner {
         debug!("Scanning {}", dent.path().display());
         let mmap = Mmap::open_path(dent.path(), Protection::Read)?;
         let buf: &[u8] = unsafe { mmap.as_slice() };
-        if len > self.quickcheck as u64 {
+        if self.quickcheck > 0 && len > self.quickcheck as u64 {
             if twoway::find_bytes(&buf[0..self.quickcheck], b"/nix/store/").is_none() {
                 return Ok(vec![]);
             }
@@ -136,5 +136,27 @@ impl Scanner {
             dent: dent,
             refs: refs,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tests::{assert_eq_vecs, dent};
+    use super::*;
+
+    #[test]
+    fn should_not_look_further_than_quickcheck() {
+        let mut scanner = Scanner::default();
+        assert_eq_vecs(
+            scanner.find_paths(dent("dir2/lftp.offset")).unwrap().refs,
+            |path| path.to_str().unwrap(),
+            &["/nix/store/q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24"],
+        );
+        scanner.quickcheck = 4096;
+        assert_eq_vecs(
+            scanner.find_paths(dent("dir2/lftp.offset")).unwrap().refs,
+            |path| path.to_str().unwrap(),
+            &[],
+        );
     }
 }

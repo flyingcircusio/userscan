@@ -17,12 +17,6 @@ use std::sync::{Arc, mpsc};
 pub type GcRootsTx = mpsc::Sender<Arc<StorePaths>>;
 pub type GcRootsRx = mpsc::Receiver<Arc<StorePaths>>;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Cleanup {
-    registered: usize,
-    cleaned: usize,
-}
-
 fn extract_hash<'a>(path: &'a Path) -> &'a [u8] {
     &path.strip_prefix("/nix/store/")
         .unwrap_or(path)
@@ -140,35 +134,61 @@ impl GCRoots {
 }
 
 pub trait Register {
-    fn register_loop(&mut self, rx: GcRootsRx) -> Result<Cleanup>;
+    fn register_loop(&mut self, rx: GcRootsRx) -> Result<()>;
 }
 
 impl Register for GCRoots {
-    fn register_loop(&mut self, rx: GcRootsRx) -> Result<Cleanup> {
-        info!("Registering refs in {}", p2s(&self.topdir));
+    fn register_loop(&mut self, rx: GcRootsRx) -> Result<()> {
         let registered = rx.iter()
             .map(|sp| self.register(&sp))
             .sum::<Result<usize>>()?;
         let cleaned = self.cleanup()?;
         info!(
-            "Registered {} store ref(s), cleaned {} store ref(s)",
+            "Registered {} store ref(s), cleaned {} store ref(s) in {}",
             registered.to_string().green(),
-            cleaned.to_string().cyan()
+            cleaned.to_string().cyan(),
+            p2s(&self.topdir)
         );
-        Ok(Cleanup {
-            registered: registered,
-            cleaned: cleaned,
-        })
+        Ok(())
     }
 }
 
 pub struct NullGCRoots;
 
 impl Register for NullGCRoots {
-    fn register_loop(&mut self, rx: GcRootsRx) -> Result<Cleanup> {
+    fn register_loop(&mut self, rx: GcRootsRx) -> Result<()> {
         for _ in rx {
             () // consume the channel
         }
-        Ok(Cleanup::default())
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone)]
+pub struct FakeGCRoots {
+    pub registered: Vec<String>,
+}
+
+#[cfg(test)]
+impl FakeGCRoots {
+    pub fn new() -> Self {
+        FakeGCRoots { registered: Vec::new() }
+    }
+}
+
+#[cfg(test)]
+impl Register for FakeGCRoots {
+    fn register_loop(&mut self, rx: GcRootsRx) -> Result<()> {
+        for storepaths in rx {
+            for r in storepaths.refs() {
+                self.registered.push(format!(
+                    "{}|{}",
+                    storepaths.path().display(),
+                    r.display()
+                ));
+            }
+        }
+        Ok(())
     }
 }
