@@ -102,7 +102,7 @@ mod tests {
 
     #[test]
     fn walk_fixture_dir1() {
-        let mut gcroots = registry::FakeGCRoots::new();
+        let mut gcroots = registry::tests::FakeGCRoots::new();
         let softerrs = spawn_threads(Arc::new(args("dir1")), &mut gcroots).unwrap();
         assert_eq_vecs(
             gcroots.registered,
@@ -149,7 +149,7 @@ mod tests {
             "pattern[*"
         ).unwrap();
 
-        let mut gcroots = registry::FakeGCRoots::new();
+        let mut gcroots = registry::tests::FakeGCRoots::new();
         let softerrs = spawn_threads(Arc::new(args(t.path())), &mut gcroots).unwrap();
         println!("registered GC roots: {:?}", gcroots.registered);
         assert_eq!(gcroots.registered.len(), 1);

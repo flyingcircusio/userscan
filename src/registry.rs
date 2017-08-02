@@ -165,30 +165,32 @@ impl Register for NullGCRoots {
 }
 
 #[cfg(test)]
-#[derive(Debug, Clone)]
-pub struct FakeGCRoots {
-    pub registered: Vec<String>,
-}
+pub mod tests {
+    use super::*;
 
-#[cfg(test)]
-impl FakeGCRoots {
-    pub fn new() -> Self {
-        FakeGCRoots { registered: Vec::new() }
+    #[derive(Debug, Clone)]
+    pub struct FakeGCRoots {
+        pub registered: Vec<String>,
     }
-}
 
-#[cfg(test)]
-impl Register for FakeGCRoots {
-    fn register_loop(&mut self, rx: GcRootsRx) -> Result<()> {
-        for storepaths in rx {
-            for r in storepaths.refs() {
-                self.registered.push(format!(
-                    "{}|{}",
-                    storepaths.path().display(),
-                    r.display()
-                ));
-            }
+    impl FakeGCRoots {
+        pub fn new() -> Self {
+            FakeGCRoots { registered: Vec::new() }
         }
-        Ok(())
+    }
+
+    impl Register for FakeGCRoots {
+        fn register_loop(&mut self, rx: GcRootsRx) -> Result<()> {
+            for storepaths in rx {
+                for r in storepaths.refs() {
+                    self.registered.push(format!(
+                        "{}|{}",
+                        storepaths.path().display(),
+                        r.display()
+                    ));
+                }
+            }
+            Ok(())
+        }
     }
 }
