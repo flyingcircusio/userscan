@@ -37,11 +37,11 @@ where
     }
 }
 
-pub fn dent(path: &str) -> ignore::DirEntry {
-    args(path)
+pub fn dent<P: AsRef<Path>>(path: P) -> ignore::DirEntry {
+    args(&path)
         .walker()
         .build()
         .next()
-        .unwrap_or_else(|| panic!("didn't find path: {}", path))
+        .unwrap_or_else(|| panic!("didn't find path: {}", path.as_ref().display()))
         .unwrap_or_else(|e| panic!("unable to read path: {}", e))
 }

@@ -2,59 +2,15 @@ extern crate memmap;
 extern crate regex;
 extern crate twoway;
 
+use cache::StorePaths;
 use errors::*;
-use ignore::{self, DirEntry};
+use ignore::DirEntry;
 use self::memmap::{Mmap, Protection};
 use self::regex::bytes::Regex;
 use std::ffi::OsStr;
 use std::fs;
-use std::fmt;
 use std::os::unix::prelude::*;
-use std::path::{Path, PathBuf};
-
-#[derive(Debug)]
-pub struct StorePaths {
-    dent: DirEntry,
-    refs: Vec<PathBuf>,
-}
-
-impl StorePaths {
-    pub fn path(&self) -> &Path {
-        self.dent.path()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.refs.is_empty()
-    }
-
-    pub fn error(&self) -> Option<&ignore::Error> {
-        self.dent.error()
-    }
-
-    #[allow(dead_code)]
-    pub fn refs(&self) -> &Vec<PathBuf> {
-        &self.refs
-    }
-
-    pub fn iter_refs<'a>(&'a self) -> Box<Iterator<Item = &Path> + 'a> {
-        Box::new(self.refs.iter().map(|p| p.as_path()))
-    }
-}
-
-impl fmt::Display for StorePaths {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.refs.is_empty() {
-            write!(f, "{}", self.dent.path().display())
-        } else {
-            write!(f, "{}:", self.dent.path().display())?;
-            for r in self.refs.iter() {
-                write!(f, " {}", r.display())?;
-            }
-            Ok(())
-        }
-    }
-}
-
+use std::path::PathBuf;
 
 lazy_static! {
     static ref STORE_RE: Regex = Regex::new(
@@ -127,14 +83,10 @@ impl Scanner {
     }
 
     pub fn find_paths(&self, dent: DirEntry) -> Result<StorePaths> {
-        let refs = self.scan(&dent).map(|mut paths| {
+        self.scan(&dent).map(|mut paths| {
             paths.sort();
             paths.dedup();
-            paths
-        })?;
-        Ok(StorePaths {
-            dent: dent,
-            refs: refs,
+            StorePaths::new(dent, paths)
         })
     }
 }
@@ -148,13 +100,21 @@ mod tests {
     fn should_not_look_further_than_quickcheck() {
         let mut scanner = Scanner::default();
         assert_eq_vecs(
-            scanner.find_paths(dent("dir2/lftp.offset")).unwrap().refs,
+            scanner
+                .find_paths(dent("dir2/lftp.offset"))
+                .unwrap()
+                .refs()
+                .to_vec(),
             |path| path.to_str().unwrap(),
             &["/nix/store/q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24"],
         );
         scanner.quickcheck = 4096;
         assert_eq_vecs(
-            scanner.find_paths(dent("dir2/lftp.offset")).unwrap().refs,
+            scanner
+                .find_paths(dent("dir2/lftp.offset"))
+                .unwrap()
+                .refs()
+                .to_vec(),
             |path| path.to_str().unwrap(),
             &[],
         );

@@ -1,6 +1,7 @@
 use bytesize::ByteSize;
 use errors::*;
-use scan::{StorePaths, ScanResult};
+use cache::StorePaths;
+use scan::ScanResult;
 use std::fmt;
 use std::iter::FromIterator;
 

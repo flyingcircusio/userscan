@@ -1,43 +1,43 @@
 extern crate crossbeam;
 
+use cache::{Cache, Lookup};
 use errors::*;
 use ignore::{self, DirEntry, WalkState};
-use output::{Output, p2s, fmt_error_chain};
+use output::{p2s, fmt_error_chain};
 use registry::{Register, GcRootsTx};
 use scan::Scanner;
 use std::ops::DerefMut;
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use super::Args;
 
 fn process_direntry(
     dent: DirEntry,
-    args: &Args,
+    cache: &Mutex<Cache>,
     scanner: &Scanner,
-    output: &Output,
     softerrs: &AtomicUsize,
     gc: &GcRootsTx,
 ) -> Result<WalkState> {
-    let sp = scanner.find_paths(dent)?;
+    let sp = match cache.lock().unwrap().lookup(dent) {
+        Lookup::Hit(sp) => sp,
+        Lookup::Miss(d) => scanner.find_paths(d)?,
+    };
     if let Some(err) = sp.error() {
         warn!("{}", err);
         softerrs.fetch_add(1, Ordering::SeqCst);
     }
+    let sp = Arc::new(sp);
     if !sp.is_empty() {
-        let sp = Arc::new(sp);
         gc.send(sp.clone()).chain_err(|| ErrorKind::WalkAbort)?;
-        if args.list {
-            output.print_store_paths(&sp)?
-        }
     }
+    cache.lock().unwrap().insert(&sp)?;
     Ok(WalkState::Continue)
 }
 
-fn walk(args: Arc<Args>, softerrs: Arc<AtomicUsize>, gc: GcRootsTx) {
+fn walk(args: Arc<Args>, cache: Arc<Mutex<Cache>>, softerrs: Arc<AtomicUsize>, gc: GcRootsTx) {
     args.walker().build_parallel().run(|| {
-        let args = args.clone();
-        let output = args.output().clone();
         let scanner = args.scanner();
+        let cache = cache.clone();
         let softerrs = softerrs.clone();
         let gc = gc.clone();
         Box::new(move |res: ::std::result::Result<
@@ -46,7 +46,7 @@ fn walk(args: Arc<Args>, softerrs: Arc<AtomicUsize>, gc: GcRootsTx) {
         >| {
             res.map_err(From::from)
                 .and_then(|dent| {
-                    process_direntry(dent, &args, &scanner, &output, &softerrs, &gc)
+                    process_direntry(dent, &cache, &scanner, &softerrs, &gc)
                 })
                 .unwrap_or_else(|err: Error| match err {
                     Error(ErrorKind::WalkContinue, _) => WalkState::Continue,
@@ -65,13 +65,15 @@ fn spawn_threads(args: Arc<Args>, gcroots: &mut Register) -> Result<usize> {
     let startdir_abs = args.startdir.canonicalize().chain_err(|| {
         format!("start dir {} not accessible", p2s(&args.startdir))
     })?;
+    let cache = Arc::new(Mutex::new(args.cache()?));
     let softerrs = Arc::new(AtomicUsize::new(0));
     let (gcroots_tx, gcroots_rx) = mpsc::channel();
     info!("Scouting {}", p2s(&startdir_abs));
 
     crossbeam::scope(|threadscope| -> Result<()> {
         let softerrs = softerrs.clone();
-        threadscope.spawn(move || walk(args, softerrs, gcroots_tx));
+        let cache = cache.clone();
+        threadscope.spawn(move || walk(args.clone(), cache, softerrs, gcroots_tx));
         gcroots.register_loop(gcroots_rx)
     })?;
     Ok(softerrs.load(Ordering::SeqCst))
@@ -144,10 +146,7 @@ mod tests {
         set_permissions(&unreadable_d, Permissions::from_mode(0o111)).unwrap();
 
         let borked_ignore = t.path().join(".ignore");
-        writeln!(
-            File::create(&borked_ignore).unwrap(),
-            "pattern[*"
-        ).unwrap();
+        writeln!(File::create(&borked_ignore).unwrap(), "pattern[*").unwrap();
 
         let mut gcroots = registry::tests::FakeGCRoots::new();
         let softerrs = spawn_threads(Arc::new(args(t.path())), &mut gcroots).unwrap();
