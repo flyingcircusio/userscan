@@ -2,7 +2,9 @@ extern crate atty;
 extern crate bytesize;
 extern crate colored;
 extern crate env_logger;
+extern crate flate2;
 extern crate ignore;
+extern crate nix;
 extern crate users;
 #[macro_use]
 extern crate clap;

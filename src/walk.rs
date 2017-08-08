@@ -7,18 +7,19 @@ use output::{p2s, fmt_error_chain};
 use registry::{Register, GcRootsTx};
 use scan::Scanner;
 use std::ops::DerefMut;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, mpsc};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use super::Args;
 
 fn process_direntry(
     dent: DirEntry,
-    cache: &Mutex<Cache>,
+    cache: &Cache,
     scanner: &Scanner,
     softerrs: &AtomicUsize,
     gc: &GcRootsTx,
 ) -> Result<WalkState> {
-    let sp = match cache.lock().unwrap().lookup(dent) {
+    let sp = match cache.lookup(dent) {
+        Lookup::Dir(sp) => sp,
         Lookup::Hit(sp) => sp,
         Lookup::Miss(d) => scanner.find_paths(d)?,
     };
@@ -30,11 +31,11 @@ fn process_direntry(
     if !sp.is_empty() {
         gc.send(sp.clone()).chain_err(|| ErrorKind::WalkAbort)?;
     }
-    cache.lock().unwrap().insert(&sp)?;
+    cache.insert(&sp)?;
     Ok(WalkState::Continue)
 }
 
-fn walk(args: Arc<Args>, cache: Arc<Mutex<Cache>>, softerrs: Arc<AtomicUsize>, gc: GcRootsTx) {
+fn walk(args: Arc<Args>, cache: Arc<Cache>, softerrs: Arc<AtomicUsize>, gc: GcRootsTx) {
     args.walker().build_parallel().run(|| {
         let scanner = args.scanner();
         let cache = cache.clone();
@@ -53,7 +54,7 @@ fn walk(args: Arc<Args>, cache: Arc<Mutex<Cache>>, softerrs: Arc<AtomicUsize>, g
                     Error(ErrorKind::WalkAbort, _) => WalkState::Quit,
                     _ => {
                         warn!("{}", fmt_error_chain(&err));
-                        softerrs.fetch_add(1, Ordering::SeqCst);
+                        softerrs.fetch_add(1, Ordering::Relaxed);
                         WalkState::Continue
                     }
                 })
@@ -65,17 +66,19 @@ fn spawn_threads(args: Arc<Args>, gcroots: &mut Register) -> Result<usize> {
     let startdir_abs = args.startdir.canonicalize().chain_err(|| {
         format!("start dir {} not accessible", p2s(&args.startdir))
     })?;
-    let cache = Arc::new(Mutex::new(args.cache()?));
+    let mut cache = Arc::new(args.cache()?);
     let softerrs = Arc::new(AtomicUsize::new(0));
     let (gcroots_tx, gcroots_rx) = mpsc::channel();
     info!("Scouting {}", p2s(&startdir_abs));
 
-    crossbeam::scope(|threadscope| -> Result<()> {
+    crossbeam::scope(|threads| -> Result<()> {
         let softerrs = softerrs.clone();
         let cache = cache.clone();
-        threadscope.spawn(move || walk(args.clone(), cache, softerrs, gcroots_tx));
+        threads.spawn(move || walk(args.clone(), cache, softerrs, gcroots_tx));
         gcroots.register_loop(gcroots_rx)
     })?;
+    let mut cache = Arc::get_mut(&mut cache).expect("BUG: pending references to cache object");
+    cache.commit()?;
     Ok(softerrs.load(Ordering::SeqCst))
 }
 
