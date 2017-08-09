@@ -180,9 +180,7 @@ impl Register for NullGCRoots {
 
 #[cfg(test)]
 pub mod tests {
-    extern crate tempdir;
-
-    use self::tempdir::TempDir;
+    use tempdir::TempDir;
     use super::*;
 
     fn _gcroots() -> (TempDir, GCRoots) {

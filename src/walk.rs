@@ -79,6 +79,7 @@ fn spawn_threads(args: Arc<Args>, gcroots: &mut Register) -> Result<usize> {
     })?;
     let mut cache = Arc::get_mut(&mut cache).expect("BUG: pending references to cache object");
     cache.commit()?;
+    cache.log_statistics();
     Ok(softerrs.load(Ordering::SeqCst))
 }
 

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use super::*;
 
 lazy_static! {
-    static ref FIXTURES: PathBuf = Path::new(file!()).parent().unwrap().join("../../fixtures")
+    pub static ref FIXTURES: PathBuf = Path::new(file!()).parent().unwrap().join("../../fixtures")
         .canonicalize().unwrap();
 }
 

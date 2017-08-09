@@ -5,6 +5,9 @@ extern crate env_logger;
 extern crate flate2;
 extern crate ignore;
 extern crate nix;
+extern crate serde;
+extern crate serde_json;
+extern crate tree_magic;
 extern crate users;
 #[macro_use]
 extern crate clap;
@@ -16,8 +19,9 @@ extern crate lazy_static;
 extern crate log;
 #[macro_use]
 extern crate serde_derive;
-extern crate serde;
-extern crate serde_json;
+
+#[cfg(test)]
+extern crate tempdir;
 
 mod cache;
 mod errors;

@@ -1,5 +1,6 @@
 extern crate fnv;
 
+use colored::Colorize;
 use errors::*;
 use flate2::Compression;
 use flate2::read::GzDecoder;
@@ -18,7 +19,7 @@ use std::ops::Deref;
 use std::os::unix::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[derive(Debug)]
 pub struct StorePaths {
@@ -108,6 +109,8 @@ pub struct Cache {
     filename: PathBuf,
     file: Option<fs::File>,
     dirty: AtomicBool,
+    hits: AtomicUsize,
+    misses: AtomicUsize,
 }
 
 impl Cache {
@@ -122,7 +125,9 @@ impl Cache {
         match path.extension() {
             Some(e) if e == OsStr::new("gz") => serde_json::from_reader(GzDecoder::new(r)?),
             _ => serde_json::from_reader(r),
-        }.chain_err(|| format!("format error while reading cache file {}", p2s(path)))
+        }.chain_err(|| {
+            format!("format error while reading cache file {}", p2s(path))
+        })
     }
 
     pub fn open<P: AsRef<Path>>(mut self, path: P) -> Result<Self> {
@@ -144,7 +149,10 @@ impl Cache {
         if file.metadata()?.len() > 0 {
             self.map = RwLock::new(self.read(&mut file)?);
             self.dirty = AtomicBool::new(false);
-            debug!("Loaded {} entries from cache", self.map.read().unwrap().len());
+            debug!(
+                "Loaded {} entries from cache",
+                self.map.read().unwrap().len()
+            );
         } else {
             debug!("Creating new cache {}", p2s(&path));
             self.map.write().unwrap().clear();
@@ -203,14 +211,17 @@ impl Cache {
         }
         match self.get(&dent) {
             Ok(refs) => {
-                debug!("Cache hit: {}", dent.path().display());
+                self.hits.fetch_add(1, Ordering::Relaxed);
                 Lookup::Hit(StorePaths {
                     dent: dent,
                     refs: refs,
                     cached: true,
                 })
             }
-            Err(_) => Lookup::Miss(dent),
+            Err(_) => {
+                self.misses.fetch_add(1, Ordering::Relaxed);
+                Lookup::Miss(dent)
+            }
         }
     }
 
@@ -232,6 +243,43 @@ impl Cache {
         self.dirty.store(true, Ordering::Release);
         Ok(())
     }
+
+    /* statistics */
+
+    pub fn len(&self) -> usize {
+        self.map.read().unwrap().len()
+    }
+
+    #[allow(dead_code)]
+    pub fn nrefs(&self) -> usize {
+        self.map
+            .read()
+            .unwrap()
+            .values()
+            .map(|cl| cl.refs.len())
+            .sum()
+    }
+
+    pub fn hit_ratio(&self) -> f32 {
+        let h = self.hits.load(Ordering::SeqCst);
+        let m = self.misses.load(Ordering::SeqCst);
+        if h == 0 {
+            0.0
+        } else {
+            h as f32 / (h as f32 + m as f32)
+        }
+    }
+
+    pub fn log_statistics(&self) {
+        if self.file.is_some() {
+            info!(
+                "Cache saved to {}, {} entries, hit ratio {}%",
+                p2s(&self.filename),
+                self.len().to_string().cyan(),
+                ((self.hit_ratio() * 100.0) as u32).to_string().cyan()
+            )
+        }
+    }
 }
 
 impl ToString for Cache {
@@ -248,7 +296,8 @@ mod tests {
     use std::fs;
     use super::*;
     use super::Lookup::*;
-    use tests::dent;
+    use tests::{FIXTURES, dent};
+    use tempdir::TempDir;
 
     #[test]
     fn insert_cacheline() {
@@ -267,23 +316,38 @@ mod tests {
             "cache entry not found",
         );
         assert_eq!(entry.len, 1157);
-        assert_eq!(entry.ctime, fs::metadata("dir1/proto-http.la").unwrap().ctime());
-        assert!(c.dirty.load(Ordering::SeqCst));
+        assert_eq!(
+            entry.ctime,
+            fs::metadata("dir1/proto-http.la").unwrap().ctime()
+        );
+    }
+
+    fn sp_dummy() -> StorePaths {
+        let dent = tests::dent("dir2/lftp");
+        StorePaths {
+            dent: dent,
+            refs: vec![
+                PathBuf::from("/nix/store/q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24"),
+            ],
+            cached: false,
+        }
     }
 
     #[test]
     fn lookup_should_miss_on_changed_metadata() {
         let c = Cache::new();
-        let dent = tests::dent("dir2/lftp");
-        let ino = dent.ino().unwrap();
-        c.insert(&StorePaths {
-            dent: dent,
-            refs: vec![PathBuf::from("/nix/store/ref")],
-            cached: false,
-        }).expect("insert failed");
+        let ino = tests::dent("dir2/lftp").ino().unwrap();
+        c.insert(&sp_dummy()).expect("insert failed");
 
         match c.lookup(tests::dent("dir2/lftp")) {
-            Hit(sp) => assert_eq!(vec![PathBuf::from("/nix/store/ref")], sp.refs),
+            Hit(sp) => {
+                assert_eq!(
+                    vec![
+                        PathBuf::from("/nix/store/q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24"),
+                    ],
+                    sp.refs
+                )
+            }
             _ => panic!("test failure: did not find dir2/lftp in cache"),
         }
 
@@ -294,11 +358,48 @@ mod tests {
         }
     }
 
-    /*
-     * TODO testing
-     * test "used" logic
-     * "cached" logic
-     * test gzip actually takes place
-     * cache hit stats
-     */
+    #[test]
+    fn load_save_cache_json_roundtrip() {
+        let td = TempDir::new("load_cache_json").unwrap();
+        let cache_file = td.path().join("cache.json");
+        fs::copy(FIXTURES.join("cache.json"), &cache_file).unwrap();
+        let mut c = Cache::new().open(&cache_file).unwrap();
+        assert_eq!(10, c.len());
+        assert!(!c.dirty.load(Ordering::SeqCst));
+        for ref cl in c.map.read().unwrap().values() {
+            assert!(!cl.used);
+        }
+
+        c.insert(&sp_dummy()).unwrap();
+        assert!(c.dirty.load(Ordering::SeqCst));
+        // exactly the newly inserted cacheline should have the "used" flag set
+        assert_eq!(
+            1,
+            c.map
+                .read()
+                .unwrap()
+                .values()
+                .filter(|cl| cl.used)
+                .collect::<Vec<_>>()
+                .len()
+        );
+
+        c.commit().unwrap();
+        assert_eq!(1, c.len());
+        let json_len = fs::metadata(&cache_file).unwrap().len();
+        println!("json_len: {}", json_len);
+        assert!(json_len > 130 && json_len < 138);
+    }
+
+    #[test]
+    fn commit_actually_gzips_file() {
+        let td = TempDir::new("commit_actually_gzips_file").unwrap();
+        let file = td.path().join("cache.json.gz");
+        let mut c = Cache::new().open(&file).unwrap();
+        // open should create empty file
+        assert_eq!(0, fs::metadata(&file).unwrap().len());
+        c.insert(&sp_dummy()).unwrap();
+        c.commit().unwrap();
+        assert_eq!("application/gzip", ::tree_magic::from_filepath(&file));
+    }
 }
