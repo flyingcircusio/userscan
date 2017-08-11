@@ -3,9 +3,13 @@ name = "fc-userscan"
 version = "0.1.0"
 authors = ["Christian Kauhaus <kc@flyingcircus.io>"]
 description = """\
-Searches for Nix store references and registers them with the Nix garbage \
-collector.
+Searches arbitrary directories for Nix store references and registers them \
+with the Nix garbage collector.
 """
+repository = "https://github.com/flyingcircusio/userscan"
+readme = "README"
+categories = ["command-line-utilities", "filesystem", "os"]
+license = "BSD-3-Clause"
 
 [dependencies]
 atty = "0.2"
