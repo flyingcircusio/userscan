@@ -7,7 +7,7 @@ Searches arbitrary directories for Nix store references and registers them \
 with the Nix garbage collector.
 """
 repository = "https://github.com/flyingcircusio/userscan"
-readme = "README"
+readme = "README.md"
 categories = ["command-line-utilities", "filesystem", "os"]
 license = "BSD-3-Clause"
 
