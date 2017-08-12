@@ -35,17 +35,17 @@ mod tests;
 use atty::Stream;
 use cache::Cache;
 use bytesize::ByteSize;
-use clap::{Arg, App, ArgMatches};
+use clap::{Arg, ArgMatches};
 use errors::*;
 use output::{Output, p2s};
 use registry::{GCRoots, NullGCRoots, Register};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::result;
 
 static GC_PREFIX: &str = "/nix/var/nix/gcroots/profiles/per-user";
 
 #[derive(Debug, Clone)]
-pub struct Args {
+pub struct App {
     startdir: PathBuf,
     quickcheck: ByteSize,
     register: bool,
@@ -53,7 +53,7 @@ pub struct Args {
     cachefile: Option<PathBuf>,
 }
 
-impl Args {
+impl App {
     fn walker(&self) -> ignore::WalkBuilder {
         let mut wb = ignore::WalkBuilder::new(&self.startdir);
         wb.git_exclude(false)
@@ -69,23 +69,13 @@ impl Args {
     }
 
     fn gcroots(&self) -> Result<Box<Register>> {
-        if !self.register {
-            return Ok(Box::new(NullGCRoots::new(self.output())));
+        if self.register {
+            Ok(Box::new(
+                GCRoots::new(GC_PREFIX, &self.startdir, &self.output)?,
+            ))
+        } else {
+            Ok(Box::new(NullGCRoots::new(&self.output)))
         }
-        let user = match users::get_current_username() {
-            Some(u) => u,
-            _ => return Err("failed to query current user name".into()),
-        };
-        let gc = GCRoots::new(
-            &Path::new(GC_PREFIX).join(&user),
-            &self.startdir,
-            self.output(),
-        )?;
-        Ok(Box::new(gc))
-    }
-
-    fn output(&self) -> Output {
-        self.output.clone()
     }
 
     fn cache(&self) -> Result<Cache> {
@@ -96,9 +86,9 @@ impl Args {
     }
 }
 
-impl Default for Args {
+impl Default for App {
     fn default() -> Self {
-        Args {
+        App {
             startdir: PathBuf::new(),
             quickcheck: ByteSize::kib(64),
             register: false,
@@ -108,7 +98,7 @@ impl Default for Args {
     }
 }
 
-impl<'a> From<ArgMatches<'a>> for Args {
+impl<'a> From<ArgMatches<'a>> for App {
     fn from(a: ArgMatches) -> Self {
         let output = Output::new(
             a.is_present("v"),
@@ -118,17 +108,18 @@ impl<'a> From<ArgMatches<'a>> for Args {
             a.is_present("C") || (atty::is(Stream::Stdout) && atty::is(Stream::Stderr)),
             a.is_present("l") || a.is_present("R"),
         ).log_init();
-        Args {
+
+        App {
             startdir: a.value_of_os("DIRECTORY").unwrap_or_default().into(),
+            quickcheck: ByteSize::kib(a.value_of_lossy("q").unwrap().parse::<usize>().unwrap()),
             register: !a.is_present("R"),
             output: output,
-            quickcheck: ByteSize::kib(a.value_of_lossy("q").unwrap().parse::<usize>().unwrap()),
             cachefile: a.value_of_os("CACHEFILE").map(PathBuf::from),
         }
     }
 }
 
-fn parse_args() -> Args {
+fn parse_args() -> App {
     let a = |short, long, help| Arg::with_name(short).short(short).long(long).help(help);
     let kb_val = |s: String| -> result::Result<(), String> {
         s.parse::<u32>().map(|_| ()).map_err(|e| e.to_string())
@@ -145,13 +136,15 @@ fn parse_args() -> Args {
         }
     };
 
-    App::new(crate_name!())
+    clap::App::new(crate_name!())
         .version(crate_version!())
         .about(crate_description!())
         .arg(Arg::with_name("DIRECTORY").required(true).help(
             "Start scan in DIRECTORY",
         ))
-        .arg(a("l", "list", "Shows files containing Nix store references").display_order(1))
+        .arg(
+            a("l", "list", "Shows files containing Nix store references").display_order(1),
+        )
         .arg(
             Arg::with_name("CACHEFILE")
                 .short("c")
@@ -164,18 +157,31 @@ fn parse_args() -> Args {
                 .validator(cachefile_val),
         )
         .arg(
-           a(
+            a(
                 "R",
                 "no-register",
                 "Don't register found references, implies --list",
             ).display_order(2),
         )
-        .arg(a("1", "oneline", "Prints each file with references on a single line"))
+        .arg(a(
+            "1",
+            "oneline",
+            "Prints each file with references on a single line",
+        ))
         .arg(a("C", "color", "Funky colorful output"))
+        .arg(a(
+            "s",
+            "statistics",
+            "Prints additional statistics about file types and sizes",
+        ))
         .arg(a("v", "verbose", "Additional output"))
-        .arg(a("d", "debug", "Prints every file opened, implies --verbose"))
+        .arg(a(
+            "d",
+            "debug",
+            "Prints every file opened, implies --verbose",
+        ))
         .arg(
-           a(
+            a(
                 "q",
                 "quickcheck",
                 "Give up if no Nix store reference is found in the first <q> kbytes of a file",

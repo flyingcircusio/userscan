@@ -10,9 +10,9 @@ lazy_static! {
         .canonicalize().unwrap();
 }
 
-pub fn args<P: AsRef<Path>>(startdir: P) -> Args {
+pub fn app<P: AsRef<Path>>(startdir: P) -> App {
     chdir(&*FIXTURES).expect("chdir(fixtures) failed");
-    let mut a = Args::default();
+    let mut a = App::default();
     a.startdir = PathBuf::from(startdir.as_ref());
     a
 }
@@ -38,7 +38,7 @@ where
 }
 
 pub fn dent<P: AsRef<Path>>(path: P) -> ignore::DirEntry {
-    args(&path)
+    app(&path)
         .walker()
         .build()
         .next()

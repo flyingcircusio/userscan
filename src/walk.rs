@@ -9,7 +9,7 @@ use scan::Scanner;
 use std::ops::DerefMut;
 use std::sync::{Arc, mpsc};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use super::Args;
+use super::App;
 
 fn process_direntry(
     dent: DirEntry,
@@ -35,7 +35,7 @@ fn process_direntry(
     Ok(WalkState::Continue)
 }
 
-fn walk(args: Arc<Args>, cache: Arc<Cache>, softerrs: Arc<AtomicUsize>, gc: GcRootsTx) {
+fn walk(args: Arc<App>, cache: Arc<Cache>, softerrs: Arc<AtomicUsize>, gc: GcRootsTx) {
     args.walker().build_parallel().run(|| {
         let scanner = args.scanner();
         let cache = cache.clone();
@@ -62,11 +62,11 @@ fn walk(args: Arc<Args>, cache: Arc<Cache>, softerrs: Arc<AtomicUsize>, gc: GcRo
     });
 }
 
-fn spawn_threads(args: Arc<Args>, gcroots: &mut Register) -> Result<usize> {
-    let startdir_abs = args.startdir.canonicalize().chain_err(|| {
-        format!("start dir {} not accessible", p2s(&args.startdir))
+fn spawn_threads(app: Arc<App>, gcroots: &mut Register) -> Result<usize> {
+    let startdir_abs = app.startdir.canonicalize().chain_err(|| {
+        format!("start dir {} not accessible", p2s(&app.startdir))
     })?;
-    let mut cache = Arc::new(args.cache()?);
+    let mut cache = Arc::new(app.cache()?);
     let softerrs = Arc::new(AtomicUsize::new(0));
     let (gcroots_tx, gcroots_rx) = mpsc::channel();
     info!("Scouting {}", p2s(&startdir_abs));
@@ -74,7 +74,7 @@ fn spawn_threads(args: Arc<Args>, gcroots: &mut Register) -> Result<usize> {
     crossbeam::scope(|threads| -> Result<()> {
         let softerrs = softerrs.clone();
         let cache = cache.clone();
-        threads.spawn(move || walk(args.clone(), cache, softerrs, gcroots_tx));
+        threads.spawn(move || walk(app.clone(), cache, softerrs, gcroots_tx));
         gcroots.register_loop(gcroots_rx)
     })?;
     let mut cache = Arc::get_mut(&mut cache).expect("BUG: pending references to cache object");
@@ -83,9 +83,9 @@ fn spawn_threads(args: Arc<Args>, gcroots: &mut Register) -> Result<usize> {
     Ok(softerrs.load(Ordering::SeqCst))
 }
 
-pub fn run(args: Args) -> Result<i32> {
-    let mut gcroots = args.gcroots()?;
-    let softerrs = spawn_threads(Arc::new(args), gcroots.deref_mut())?;
+pub fn run(app: App) -> Result<i32> {
+    let mut gcroots = app.gcroots()?;
+    let softerrs = spawn_threads(Arc::new(app), gcroots.deref_mut())?;
     if softerrs > 0 {
         warn!("{} soft error(s)", softerrs);
         Ok(1)
@@ -104,12 +104,12 @@ mod tests {
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
     use super::*;
-    use tests::{args, assert_eq_vecs};
+    use tests::{app, assert_eq_vecs};
 
     #[test]
     fn walk_fixture_dir1() {
         let mut gcroots = registry::tests::FakeGCRoots::new();
-        let softerrs = spawn_threads(Arc::new(args("dir1")), &mut gcroots).unwrap();
+        let softerrs = spawn_threads(Arc::new(app("dir1")), &mut gcroots).unwrap();
         assert_eq_vecs(
             gcroots.registered,
             |s| &s,
@@ -153,7 +153,7 @@ mod tests {
         writeln!(File::create(&borked_ignore).unwrap(), "pattern[*").unwrap();
 
         let mut gcroots = registry::tests::FakeGCRoots::new();
-        let softerrs = spawn_threads(Arc::new(args(t.path())), &mut gcroots).unwrap();
+        let softerrs = spawn_threads(Arc::new(app(t.path())), &mut gcroots).unwrap();
         println!("registered GC roots: {:?}", gcroots.registered);
         assert_eq!(gcroots.registered.len(), 1);
         assert_eq!(softerrs, 3);

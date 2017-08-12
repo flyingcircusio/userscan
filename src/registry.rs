@@ -10,9 +10,10 @@ use std::fs;
 use std::io;
 use std::os::unix;
 use std::os::unix::prelude::*;
-use std::result;
 use std::path::{Path, PathBuf};
+use std::result;
 use std::sync::{Arc, mpsc};
+use users::get_current_username;
 
 pub type GcRootsTx = mpsc::Sender<Arc<StorePaths>>;
 pub type GcRootsRx = mpsc::Receiver<Arc<StorePaths>>;
@@ -35,18 +36,21 @@ pub struct GCRoots {
 }
 
 impl GCRoots {
-    pub fn new(prefix: &Path, startdir: &Path, output: Output) -> Result<Self> {
-        let cwd = env::current_dir().chain_err(
-            || "failed to determine current dir",
-        )?;
+    pub fn new(peruser: &str, startdir: &Path, output: &Output) -> Result<Self> {
+        let user = match get_current_username() {
+            Some(u) => u,
+            None => return Err("failed to query current user name".into()),
+        };
+        let prefix = Path::new(peruser).join(&user);
+        let cwd = env::current_dir().chain_err(|| "failed to determine current dir")?;
         let startdir = startdir.canonicalize().chain_err(|| {
             format!("start dir {} does not appear to exist", p2s(startdir))
         })?;
         Ok(GCRoots {
-            prefix: prefix.to_path_buf(),
             topdir: prefix.join(startdir.strip_prefix("/").unwrap()),
+            prefix: prefix,
             cwd: cwd,
-            output: output,
+            output: output.to_owned(),
             ..GCRoots::default()
         })
     }
@@ -176,8 +180,8 @@ pub struct NullGCRoots {
 }
 
 impl NullGCRoots {
-    pub fn new(output: Output) -> Self {
-        NullGCRoots { output: output }
+    pub fn new(output: &Output) -> Self {
+        NullGCRoots { output: output.clone() }
     }
 }
 
@@ -220,9 +224,9 @@ pub mod tests {
     fn nonexistent_startdir_should_fail() {
         assert!(
             GCRoots::new(
-                &Path::new("/nix/var/nix/gcroots"),
+                "/nix/var/nix/gcroots",
                 &env::current_dir().unwrap().join("27866/24235/20772"),
-                Output::default(),
+                &Output::default(),
             ).is_err()
         )
     }
