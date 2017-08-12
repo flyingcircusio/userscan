@@ -158,21 +158,33 @@ impl Register for GCRoots {
             .sum::<Result<usize>>()?;
         let cleaned = self.cleanup()?;
         info!(
-            "Registered {} store ref(s), cleaned {} store ref(s) in {}",
-            registered.to_string().green(),
-            cleaned.to_string().cyan(),
+            "{} references in {}",
+            self.seen.len().to_string().cyan(),
             p2s(&self.topdir)
+        );
+        info!(
+            "newly registered: {}, cleaned: {}",
+            registered.to_string().green(),
+            cleaned.to_string().purple()
         );
         Ok(())
     }
 }
 
-pub struct NullGCRoots;
+pub struct NullGCRoots {
+    output: Output,
+}
+
+impl NullGCRoots {
+    pub fn new(output: Output) -> Self {
+        NullGCRoots { output: output }
+    }
+}
 
 impl Register for NullGCRoots {
     fn register_loop(&mut self, rx: GcRootsRx) -> Result<()> {
-        for _ in rx {
-            () // consume the channel
+        for storepaths in rx {
+            self.output.print_store_paths(&storepaths)?;
         }
         Ok(())
     }
