@@ -32,7 +32,6 @@ mod walk;
 #[cfg(test)]
 mod tests;
 
-use atty::Stream;
 use cache::Cache;
 use bytesize::ByteSize;
 use clap::{Arg, ArgMatches};
@@ -104,8 +103,7 @@ impl<'a> From<ArgMatches<'a>> for App {
             a.is_present("v"),
             a.is_present("d"),
             a.is_present("1"),
-            // XXX broken
-            a.is_present("C") || (atty::is(Stream::Stdout) && atty::is(Stream::Stderr)),
+            a.value_of("C"),
             a.is_present("l") || a.is_present("R"),
         ).log_init();
 
@@ -151,7 +149,7 @@ fn parse_args() -> App {
                 .long("cache")
                 .help(
                     "Caches scan results in CACHEFILE to avoid re-scanning unchanged files. \
-                   File extension must be one of `.json` or `.json.gz`.",
+                     File extension must be one of `.json` or `.json.gz`.",
                 )
                 .takes_value(true)
                 .validator(cachefile_val),
@@ -168,7 +166,16 @@ fn parse_args() -> App {
             "oneline",
             "Prints each file with references on a single line",
         ))
-        .arg(a("C", "color", "Funky colorful output"))
+        .arg(
+            a("C", "color", "Funky colorful output")
+                .takes_value(true)
+                .possible_values(&["always", "never", "auto"])
+                .default_value("auto")
+                .long_help(
+                    "Turns on funky colorful output. If set to \"auto\", color is on if \
+                     run in a terminal.",
+                ),
+        )
         .arg(a(
             "s",
             "statistics",

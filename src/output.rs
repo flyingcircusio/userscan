@@ -1,3 +1,4 @@
+use atty::{self, Stream};
 use cache::StorePaths;
 use colored::{self, Colorize, ColoredString};
 use env_logger::LogBuilder;
@@ -18,7 +19,7 @@ pub fn fmt_error_chain(err: &Error) -> String {
 pub struct Output {
     level: LogLevelFilter,
     oneline: bool,
-    color: bool,
+    color: Option<bool>,
     list: bool,
 }
 
@@ -27,14 +28,20 @@ impl Default for Output {
         Output {
             level: LogLevelFilter::Off,
             oneline: false,
-            color: false,
+            color: None,
             list: false,
         }
     }
 }
 
 impl Output {
-    pub fn new(verbose: bool, debug: bool, oneline: bool, color: bool, list: bool) -> Output {
+    pub fn new(
+        verbose: bool,
+        debug: bool,
+        oneline: bool,
+        color: Option<&str>,
+        list: bool,
+    ) -> Output {
         Output {
             level: match (verbose, debug) {
                 (_, true) => LogLevelFilter::Debug,
@@ -42,14 +49,19 @@ impl Output {
                 _ => LogLevelFilter::Warn,
             },
             oneline: oneline,
-            color: color,
+            color: match color {
+                Some("always") => Some(true),
+                Some("never") => Some(false),
+                Some("auto") => Some(atty::is(Stream::Stdout) && atty::is(Stream::Stderr)),
+                _ => None,
+            },
             list: list,
         }
     }
 
     pub fn log_init(self) -> Self {
-        if self.color {
-            colored::control::set_override(true)
+        if let Some(v) = self.color {
+            colored::control::set_override(v)
         }
         let fmt = |r: &LogRecord| match r.level() {
             LogLevel::Error => {
