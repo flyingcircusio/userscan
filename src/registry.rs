@@ -53,11 +53,11 @@ impl GCRoots {
             || "failed to determine current dir",
         )?;
         let startdir = startdir.canonicalize().chain_err(|| {
-            format!("start dir {} does not appear to exist", p2s(startdir))
+            format!("start dir {} is not accessible", p2s(startdir))
         })?;
         Ok(GCRoots {
             topdir: prefix.join(startdir.strip_prefix("/").unwrap()),
-            prefix: prefix,
+            prefix,
             cwd: cwd,
             output: output.to_owned(),
             ..GCRoots::default()
@@ -72,7 +72,7 @@ impl GCRoots {
     }
 
     fn create_link(&mut self, dir: &Path, linkname: PathBuf, target: &Path) -> Result<usize> {
-        debug!("Linking {}", linkname.display());
+        debug!("linking {}", linkname.display());
         fs::create_dir_all(dir).chain_err(|| {
             format!("failed to create GC dir {}", dir.display())
         })?;
@@ -140,7 +140,7 @@ impl GCRoots {
                 match meta.file_type() {
                     ft if ft.is_dir() => {
                         for _removed in fs::remove_dir(path) {
-                            debug!("Removing empty dir {}", path.display())
+                            debug!("removing empty dir {}", path.display())
                         }
                         Ok(0)
                     }
@@ -148,7 +148,7 @@ impl GCRoots {
                         if self.seen.contains(path) {
                             Ok(0)
                         } else {
-                            debug!("Unlinking {}", path.display());
+                            debug!("unlinking {}", path.display());
                             fs::remove_file(path)?;
                             Ok(1)
                         }
@@ -169,15 +169,17 @@ impl Register for GCRoots {
                     .sum::<Result<usize>>()?;
                 let cleaned = self.cleanup()?;
                 info!(
-                    "total {} references in {}",
+                    "{} references in {}",
                     self.seen.len().to_string().cyan(),
                     p2s(&self.topdir)
                 );
-                info!(
-                    "newly registered: {}, cleaned: {}",
-                    registered.to_string().green(),
-                    cleaned.to_string().purple()
-                );
+                if registered > 0 || cleaned > 0 {
+                    info!(
+                        "newly registered: {}, cleaned: {}",
+                        registered.to_string().green(),
+                        cleaned.to_string().purple()
+                    );
+                }
                 Ok(())
             }
             None => Ok(()),
@@ -248,17 +250,6 @@ pub mod tests {
     }
 
     #[test]
-    fn nonexistent_startdir_should_fail() {
-        assert!(
-            GCRoots::new(
-                "/nix/var/nix/gcroots",
-                &env::current_dir().unwrap().join("27866/24235/20772"),
-                &Output::default(),
-            ).is_err()
-        )
-    }
-
-    #[test]
     fn linkdir() {
         let (td, gc) = _gcroots();
         assert_eq!(td.path().join("home/user"), gc.gc_link_dir("file2"));
@@ -325,13 +316,15 @@ pub mod tests {
     #[derive(Debug)]
     pub struct FakeGCRoots {
         pub registered: Vec<String>,
+        prefix: PathBuf,
         rx: Option<GCRootsRx>,
     }
 
     impl FakeGCRoots {
-        pub fn new() -> Self {
+        pub fn new(reldir: &Path) -> Self {
             FakeGCRoots {
                 registered: Vec::new(),
+                prefix: reldir.canonicalize().unwrap(),
                 rx: None,
             }
         }
@@ -343,9 +336,10 @@ pub mod tests {
                 Some(ref rx) => {
                     for storepaths in rx {
                         for r in storepaths.refs() {
+                            let relpath = storepaths.path().strip_prefix(&self.prefix).unwrap();
                             self.registered.push(format!(
                                 "{}|{}",
-                                storepaths.path().display(),
+                                relpath.display(),
                                 r.display()
                             ));
                         }

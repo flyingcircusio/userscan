@@ -6,16 +6,16 @@ use ignore::{self, DirEntry, WalkState};
 use output::{p2s, fmt_error_chain};
 use registry::{Register, GCRootsTx};
 use scan::Scanner;
+use statistics::{Statistics, StatsMsg, StatsTx};
 use std::ops::DerefMut;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use super::App;
 
 fn process_direntry(
     dent: DirEntry,
     cache: &Cache,
     scanner: &Scanner,
-    softerrs: &AtomicUsize,
+    stats: &StatsTx,
     gc: &GCRootsTx,
 ) -> Result<WalkState> {
     let sp = match cache.lookup(dent) {
@@ -25,71 +25,75 @@ fn process_direntry(
     };
     if let Some(err) = sp.error() {
         warn!("{}", err);
-        softerrs.fetch_add(1, Ordering::SeqCst);
+        stats.send(StatsMsg::SoftError).chain_err(
+            || ErrorKind::WalkAbort,
+        )?;
     }
     cache.insert(&sp)?;
+    stats.send(StatsMsg::Scan((&sp).into())).chain_err(|| {
+        ErrorKind::WalkAbort
+    })?;
     if !sp.is_empty() {
         gc.send(sp).chain_err(|| ErrorKind::WalkAbort)?;
     }
     Ok(WalkState::Continue)
 }
 
-fn walk(args: Arc<App>, cache: Arc<Cache>, softerrs: Arc<AtomicUsize>, gc: GCRootsTx) {
-    args.walker().build_parallel().run(|| {
+fn walk(args: Arc<App>, cache: Arc<Cache>, stats: StatsTx, gc: GCRootsTx) -> Result<()> {
+    args.walker()?.build_parallel().run(|| {
         let scanner = args.scanner();
         let cache = cache.clone();
-        let softerrs = softerrs.clone();
+        let stats = stats.clone();
         let gc = gc.clone();
         Box::new(move |res: ::std::result::Result<
             DirEntry,
             ignore::Error,
         >| {
             res.map_err(From::from)
-                .and_then(|dent| {
-                    process_direntry(dent, &cache, &scanner, &softerrs, &gc)
-                })
+                .and_then(|dent| process_direntry(dent, &cache, &scanner, &stats, &gc))
                 .unwrap_or_else(|err: Error| match err {
                     Error(ErrorKind::WalkContinue, _) => WalkState::Continue,
                     Error(ErrorKind::WalkAbort, _) => WalkState::Quit,
                     _ => {
                         warn!("{}", fmt_error_chain(&err));
-                        softerrs.fetch_add(1, Ordering::Relaxed);
-                        WalkState::Continue
+                        match stats.send(StatsMsg::SoftError) {
+                            Err(_) => WalkState::Quit, // IPC broken
+                            Ok(_) => WalkState::Continue,
+                        }
                     }
                 })
         })
     });
+    Ok(())
 }
 
-fn spawn_threads(app: Arc<App>, gcroots: &mut Register) -> Result<usize> {
-    let startdir_abs = app.startdir.canonicalize().chain_err(|| {
-        format!("start dir {} not accessible", p2s(&app.startdir))
-    })?;
+fn spawn_threads(app: Arc<App>, gcroots: &mut Register) -> Result<Statistics> {
+    let mut stats = app.statistics();
     let mut cache = Arc::new(app.cache()?);
-    let softerrs = Arc::new(AtomicUsize::new(0));
-    info!("Scouting {}", p2s(&startdir_abs));
+    info!("Scouting {}", p2s(&app.startdir));
 
     crossbeam::scope(|threads| -> Result<()> {
         let cache = cache.clone();
-        let softerrs = softerrs.clone();
+        let stats_tx = stats.tx();
         let gcroots_tx = gcroots.tx();
-        threads.spawn(move || walk(app.clone(), cache, softerrs, gcroots_tx));
-        gcroots.register_loop()
+        let walk = threads.spawn(move || walk(app.clone(), cache, stats_tx, gcroots_tx));
+        threads.spawn(|| stats.receive_loop());
+        gcroots.register_loop()?;
+        walk.join()
     })?;
     let mut cache = Arc::get_mut(&mut cache).expect("BUG: pending references to cache object");
     cache.commit()?;
     cache.log_statistics();
-    Ok(softerrs.load(Ordering::SeqCst))
+    stats.log_summary();
+    Ok(stats)
 }
 
 pub fn run(app: App) -> Result<i32> {
     let mut gcroots = app.gcroots()?;
-    let softerrs = spawn_threads(Arc::new(app), gcroots.deref_mut())?;
-    if softerrs > 0 {
-        warn!("{} soft error(s)", softerrs);
-        Ok(1)
-    } else {
-        Ok(0)
+    let stats = spawn_threads(Arc::new(app), gcroots.deref_mut())?;
+    match stats.softerrors {
+        0 => Ok(0),
+        _ => Ok(1),
     }
 }
 
@@ -103,15 +107,15 @@ mod tests {
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
     use super::*;
-    use tests::{app, assert_eq_vecs};
+    use tests::{app, assert_eq_vecs, FIXTURES};
 
     #[test]
     fn walk_fixture_dir1() {
-        let mut gcroots = registry::tests::FakeGCRoots::new();
-        let softerrs = spawn_threads(Arc::new(app("dir1")), &mut gcroots).unwrap();
+        let mut gcroots = registry::tests::FakeGCRoots::new(&*FIXTURES);
+        let stats = spawn_threads(Arc::new(app("dir1")), &mut gcroots).unwrap();
         assert_eq_vecs(
             gcroots.registered,
-            |s| &s,
+            |s| s.to_owned(),
             &[
                 "dir1/duplicated|/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5",
                 "dir1/notignored|/nix/store/00n9gkswhqdgbhgs7lnz2ckqxphavjr8-ChasingBottoms-1.3.1.2.drv",
@@ -121,7 +125,7 @@ mod tests {
                 "dir1/six.py|/nix/store/1b4i3gm31j1ipfbx1v9a3hhgmp2wvyyw-python2.7-six-1.9.0",
             ],
         );
-        assert_eq!(softerrs, 0);
+        assert_eq!(stats.softerrors, 0);
     }
 
     #[test]
@@ -151,11 +155,11 @@ mod tests {
         let borked_ignore = t.path().join(".ignore");
         writeln!(File::create(&borked_ignore).unwrap(), "pattern[*").unwrap();
 
-        let mut gcroots = registry::tests::FakeGCRoots::new();
-        let softerrs = spawn_threads(Arc::new(app(t.path())), &mut gcroots).unwrap();
+        let mut gcroots = registry::tests::FakeGCRoots::new(t.path());
+        let stats = spawn_threads(Arc::new(app(t.path())), &mut gcroots).unwrap();
         println!("registered GC roots: {:?}", gcroots.registered);
         assert_eq!(gcroots.registered.len(), 1);
-        assert_eq!(softerrs, 3);
+        assert_eq!(stats.softerrors, 3);
 
         // otherwise it won't clean up
         set_permissions(&unreadable_d, Permissions::from_mode(0o755)).unwrap();

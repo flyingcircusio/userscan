@@ -26,13 +26,15 @@ pub struct StorePaths {
     dent: DirEntry,
     refs: Vec<PathBuf>,
     cached: bool,
+    bytes_scanned: u64,
 }
 
 impl StorePaths {
-    pub fn new(dent: DirEntry, refs: Vec<PathBuf>) -> Self {
+    pub fn new(dent: DirEntry, refs: Vec<PathBuf>, bytes_scanned: u64) -> Self {
         StorePaths {
-            dent: dent,
-            refs: refs,
+            dent,
+            refs,
+            bytes_scanned,
             cached: false,
         }
     }
@@ -69,6 +71,10 @@ impl StorePaths {
     pub fn refs(&self) -> &Vec<PathBuf> {
         &self.refs
     }
+
+    pub fn bytes_scanned(&self) -> u64 {
+        self.bytes_scanned
+    }
 }
 
 impl fmt::Display for StorePaths {
@@ -93,7 +99,6 @@ pub enum Lookup {
 
 #[derive(Debug, PartialEq, PartialOrd, Clone, Serialize, Deserialize)]
 struct CacheLine {
-    len: u64,
     ctime: i64,
     ctime_nsec: i64,
     refs: Vec<PathBuf>,
@@ -132,6 +137,7 @@ impl Cache {
 
     pub fn open<P: AsRef<Path>>(mut self, path: P) -> Result<Self> {
         self.filename = path.as_ref().to_path_buf();
+        info!("Loading cache {}", p2s(&self.filename));
         let mut file = fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -150,11 +156,11 @@ impl Cache {
             self.map = RwLock::new(self.read(&mut file)?);
             self.dirty = AtomicBool::new(false);
             debug!(
-                "Loaded {} entries from cache",
+                "loaded {} entries from cache",
                 self.map.read().unwrap().len()
             );
         } else {
-            debug!("Creating new cache {}", p2s(&path));
+            debug!("creating new cache {}", p2s(&path));
             self.map.write().unwrap().clear();
             self.dirty = AtomicBool::new(true);
         }
@@ -170,13 +176,13 @@ impl Cache {
             }
             let mut map = self.map.write().unwrap();
             map.retain(|_, ref mut v| v.used);
-            debug!("Writing {} entries to cache", map.len());
+            debug!("writing {} entries to cache", map.len());
             file.seek(io::SeekFrom::Start(0))?;
             file.set_len(0)?;
             let w = io::BufWriter::new(file);
             match path.extension() {
                 Some(e) if e == OsStr::new("gz") => {
-                    serde_json::to_writer(GzEncoder::new(w, Compression::Default), map.deref())
+                    serde_json::to_writer(GzEncoder::new(w, Compression::Fast), map.deref())
                 }
                 _ => serde_json::to_writer(w, map.deref()),
             }.chain_err(|| format!("cannot write cache file {}", p2s(path)))
@@ -191,7 +197,7 @@ impl Cache {
         let mut map = self.map.write().unwrap();
         let c = map.get_mut(&ino).ok_or(ErrorKind::CacheNotFound)?;
         let meta = dent.metadata()?;
-        if c.len == meta.len() && c.ctime == meta.ctime() && c.ctime_nsec == meta.ctime_nsec() {
+        if c.ctime == meta.ctime() && c.ctime_nsec == meta.ctime_nsec() {
             c.used = true;
             Ok(c.refs.clone())
         } else {
@@ -206,6 +212,7 @@ impl Cache {
                     dent: dent,
                     refs: vec![],
                     cached: true,
+                    bytes_scanned: 0,
                 });
             }
         }
@@ -216,6 +223,7 @@ impl Cache {
                     dent: dent,
                     refs: refs,
                     cached: true,
+                    bytes_scanned: 0,
                 })
             }
             Err(_) => {
@@ -233,7 +241,6 @@ impl Cache {
         self.map.write().unwrap().insert(
             sp.ino()?,
             CacheLine {
-                len: meta.len(),
                 ctime: meta.ctime(),
                 ctime_nsec: meta.ctime_nsec(),
                 refs: sp.refs.clone(),
@@ -307,6 +314,7 @@ mod tests {
             dent: dent,
             refs: vec![],
             cached: false,
+            bytes_scanned: 0,
         }).expect("insert failed");
         println!("Cache: {}", c.to_string());
 
@@ -315,7 +323,6 @@ mod tests {
         let entry = map.get(&dent.ino().unwrap()).expect(
             "cache entry not found",
         );
-        assert_eq!(entry.len, 1157);
         assert_eq!(
             entry.ctime,
             fs::metadata("dir1/proto-http.la").unwrap().ctime()
@@ -330,6 +337,7 @@ mod tests {
                 PathBuf::from("/nix/store/q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24"),
             ],
             cached: false,
+            bytes_scanned: 0,
         }
     }
 
@@ -351,7 +359,7 @@ mod tests {
             _ => panic!("test failure: did not find dir2/lftp in cache"),
         }
 
-        c.map.write().unwrap().get_mut(&ino).unwrap().len = 9999;
+        c.map.write().unwrap().get_mut(&ino).unwrap().ctime = 6674;
         match c.lookup(tests::dent("dir2/lftp")) {
             Miss(_) => (),
             _ => panic!("should not hit: dir2/lftp"),
@@ -388,7 +396,7 @@ mod tests {
         assert_eq!(1, c.len());
         let json_len = fs::metadata(&cache_file).unwrap().len();
         println!("json_len: {}", json_len);
-        assert!(json_len > 130 && json_len < 138);
+        assert!(json_len >= 121 && json_len <= 123);
     }
 
     #[test]

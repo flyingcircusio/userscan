@@ -1,19 +1,16 @@
 {
    "240165404" : {
       "ctime" : 1500881055,
-      "len" : 28,
       "refs" : [],
       "ctime_nsec" : 821042270
    },
    "72591925" : {
-      "len" : 12,
       "ctime" : 1500881055,
       "ctime_nsec" : 820042301,
       "refs" : []
    },
    "1275244051" : {
       "ctime" : 1500881055,
-      "len" : 202,
       "refs" : [
          "/nix/store/00n9gkswhqdgbhgs7lnz2ckqxphavjr8-ChasingBottoms-1.3.1.2.drv",
          "/nix/store/00y6xgsdpjx3fyz4v7k5lwivi28yqd9f-initrd-fsinfo.drv"
@@ -23,12 +20,10 @@
    "73747953" : {
       "ctime_nsec" : 821042270,
       "refs" : [],
-      "len" : 11,
       "ctime" : 1500881055
    },
    "1038463357" : {
       "ctime" : 1500881055,
-      "len" : 4096,
       "refs" : [
          "/nix/store/q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24"
       ],
@@ -40,26 +35,22 @@
          "/nix/store/9w3ci6fskmz3nw27fb68hybfa5v1r33f-libidn-1.33",
          "/nix/store/knvydciispmr4nr2rxg0iyyff3n1v4ax-gcc-6.2.0-lib"
       ],
-      "len" : 1157,
       "ctime" : 1500881055
    },
    "678146360" : {
       "ctime" : 1500881055,
-      "len" : 98,
       "refs" : [
          "/nix/store/1b4i3gm31j1ipfbx1v9a3hhgmp2wvyyw-python2.7-six-1.9.0"
       ],
       "ctime_nsec" : 821042270
    },
    "208226827" : {
-      "len" : 95,
       "ctime" : 1500881055,
       "ctime_nsec" : 821042270,
       "refs" : []
    },
    "260514510" : {
       "ctime" : 1500881055,
-      "len" : 168,
       "refs" : [
          "/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5"
       ],
@@ -70,7 +61,6 @@
          "/nix/store/q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24"
       ],
       "ctime_nsec" : 820042301,
-      "ctime" : 1500881055,
-      "len" : 8192
+      "ctime" : 1500881055
    }
 }

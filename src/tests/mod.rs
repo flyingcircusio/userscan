@@ -19,14 +19,14 @@ pub fn app<P: AsRef<Path>>(startdir: P) -> App {
 
 pub fn assert_eq_vecs<R, F>(result: Vec<R>, map_res: F, expect: &[&str])
 where
-    F: for<'a> Fn(&'a R) -> &'a str,
+    F: for<'a> Fn(&'a R) -> String,
 {
     let mut expected: HashSet<&str> = expect.into_iter().map(|p| *p).collect();
     let mut unexpected = Vec::new();
     for r in result {
         let key = map_res(&r);
-        if !expected.remove(key) {
-            unexpected.push(key.to_owned());
+        if !expected.remove(&*key) {
+            unexpected.push(key);
         }
     }
     if !unexpected.is_empty() {
@@ -40,6 +40,7 @@ where
 pub fn dent<P: AsRef<Path>>(path: P) -> ignore::DirEntry {
     app(&path)
         .walker()
+        .unwrap()
         .build()
         .next()
         .unwrap_or_else(|| panic!("didn't find path: {}", path.as_ref().display()))

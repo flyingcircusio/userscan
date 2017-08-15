@@ -28,6 +28,7 @@ mod errors;
 mod output;
 mod registry;
 mod scan;
+mod statistics;
 mod walk;
 #[cfg(test)]
 mod tests;
@@ -38,6 +39,7 @@ use clap::{Arg, ArgMatches};
 use errors::*;
 use output::{Output, p2s};
 use registry::{GCRoots, NullGCRoots, Register};
+use statistics::Statistics;
 use std::path::PathBuf;
 use std::result;
 
@@ -50,17 +52,21 @@ pub struct App {
     register: bool,
     output: Output,
     cachefile: Option<PathBuf>,
+    detailed_statistics: bool,
 }
 
 impl App {
-    fn walker(&self) -> ignore::WalkBuilder {
-        let mut wb = ignore::WalkBuilder::new(&self.startdir);
-        wb.git_exclude(false)
+    fn walker(&self) -> Result<ignore::WalkBuilder> {
+        let startdir = self.startdir.canonicalize().chain_err(|| {
+            format!("start dir {} is not accessible", p2s(&self.startdir))
+        })?;
+        let mut wb = ignore::WalkBuilder::new(&startdir);
+        wb.parents(false)
+            .git_exclude(false)
             .git_global(false)
             .git_ignore(false)
-            .hidden(false)
-            .parents(false);
-        wb
+            .hidden(false);
+        Ok(wb)
     }
 
     fn scanner(&self) -> scan::Scanner {
@@ -83,6 +89,10 @@ impl App {
             None => Ok(Cache::new()),
         }
     }
+
+    fn statistics(&self) -> Statistics {
+        Statistics::new(self.detailed_statistics)
+    }
 }
 
 impl Default for App {
@@ -93,6 +103,7 @@ impl Default for App {
             register: false,
             output: Output::default(),
             cachefile: None,
+            detailed_statistics: false,
         }
     }
 }
@@ -111,8 +122,9 @@ impl<'a> From<ArgMatches<'a>> for App {
             startdir: a.value_of_os("DIRECTORY").unwrap_or_default().into(),
             quickcheck: ByteSize::kib(a.value_of_lossy("q").unwrap().parse::<usize>().unwrap()),
             register: !a.is_present("R"),
-            output: output,
             cachefile: a.value_of_os("CACHEFILE").map(PathBuf::from),
+            detailed_statistics: a.is_present("s"),
+            output,
         }
     }
 }
@@ -179,7 +191,7 @@ fn parse_args() -> App {
         .arg(a(
             "s",
             "statistics",
-            "Prints additional statistics about file types and sizes",
+            "Prints detailed statistics like scans per file type.",
         ))
         .arg(a("v", "verbose", "Additional output"))
         .arg(a(
