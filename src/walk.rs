@@ -4,10 +4,10 @@ use cache::{Cache, Lookup};
 use errors::*;
 use ignore::{self, DirEntry, WalkState};
 use output::{p2s, fmt_error_chain};
-use registry::{Register, GcRootsTx};
+use registry::{Register, GCRootsTx};
 use scan::Scanner;
 use std::ops::DerefMut;
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use super::App;
 
@@ -16,7 +16,7 @@ fn process_direntry(
     cache: &Cache,
     scanner: &Scanner,
     softerrs: &AtomicUsize,
-    gc: &GcRootsTx,
+    gc: &GCRootsTx,
 ) -> Result<WalkState> {
     let sp = match cache.lookup(dent) {
         Lookup::Dir(sp) => sp,
@@ -27,15 +27,14 @@ fn process_direntry(
         warn!("{}", err);
         softerrs.fetch_add(1, Ordering::SeqCst);
     }
-    let sp = Arc::new(sp);
-    if !sp.is_empty() {
-        gc.send(sp.clone()).chain_err(|| ErrorKind::WalkAbort)?;
-    }
     cache.insert(&sp)?;
+    if !sp.is_empty() {
+        gc.send(sp).chain_err(|| ErrorKind::WalkAbort)?;
+    }
     Ok(WalkState::Continue)
 }
 
-fn walk(args: Arc<App>, cache: Arc<Cache>, softerrs: Arc<AtomicUsize>, gc: GcRootsTx) {
+fn walk(args: Arc<App>, cache: Arc<Cache>, softerrs: Arc<AtomicUsize>, gc: GCRootsTx) {
     args.walker().build_parallel().run(|| {
         let scanner = args.scanner();
         let cache = cache.clone();
@@ -68,14 +67,14 @@ fn spawn_threads(app: Arc<App>, gcroots: &mut Register) -> Result<usize> {
     })?;
     let mut cache = Arc::new(app.cache()?);
     let softerrs = Arc::new(AtomicUsize::new(0));
-    let (gcroots_tx, gcroots_rx) = mpsc::channel();
     info!("Scouting {}", p2s(&startdir_abs));
 
     crossbeam::scope(|threads| -> Result<()> {
-        let softerrs = softerrs.clone();
         let cache = cache.clone();
+        let softerrs = softerrs.clone();
+        let gcroots_tx = gcroots.tx();
         threads.spawn(move || walk(app.clone(), cache, softerrs, gcroots_tx));
-        gcroots.register_loop(gcroots_rx)
+        gcroots.register_loop()
     })?;
     let mut cache = Arc::get_mut(&mut cache).expect("BUG: pending references to cache object");
     cache.commit()?;

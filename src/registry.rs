@@ -12,11 +12,11 @@ use std::os::unix;
 use std::os::unix::prelude::*;
 use std::path::{Path, PathBuf};
 use std::result;
-use std::sync::{Arc, mpsc};
+use std::sync::mpsc;
 use users::get_current_username;
 
-pub type GcRootsTx = mpsc::Sender<Arc<StorePaths>>;
-pub type GcRootsRx = mpsc::Receiver<Arc<StorePaths>>;
+pub type GCRootsTx = mpsc::Sender<StorePaths>;
+pub type GCRootsRx = mpsc::Receiver<StorePaths>;
 
 fn extract_hash<'a>(path: &'a Path) -> &'a [u8] {
     &path.strip_prefix("/nix/store/")
@@ -26,13 +26,20 @@ fn extract_hash<'a>(path: &'a Path) -> &'a [u8] {
         [..32]
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct GCRoots {
     prefix: PathBuf, // /nix/var/nix/gcroots/profiles/per-user/$USER
     topdir: PathBuf, // e.g., $PREFIX/srv/www if /srv/www was scanned
     cwd: PathBuf, // current dir when the scan was started
     seen: HashSet<PathBuf>,
     output: Output,
+    rx: Option<GCRootsRx>,
+}
+
+pub trait Register {
+    fn register_loop(&mut self) -> Result<()>;
+
+    fn tx(&mut self) -> GCRootsTx;
 }
 
 impl GCRoots {
@@ -42,7 +49,9 @@ impl GCRoots {
             None => return Err("failed to query current user name".into()),
         };
         let prefix = Path::new(peruser).join(&user);
-        let cwd = env::current_dir().chain_err(|| "failed to determine current dir")?;
+        let cwd = env::current_dir().chain_err(
+            || "failed to determine current dir",
+        )?;
         let startdir = startdir.canonicalize().chain_err(|| {
             format!("start dir {} does not appear to exist", p2s(startdir))
         })?;
@@ -151,46 +160,69 @@ impl GCRoots {
     }
 }
 
-pub trait Register {
-    fn register_loop(&mut self, rx: GcRootsRx) -> Result<()>;
-}
-
 impl Register for GCRoots {
-    fn register_loop(&mut self, rx: GcRootsRx) -> Result<()> {
-        let registered = rx.iter()
-            .map(|sp| self.register(&sp))
-            .sum::<Result<usize>>()?;
-        let cleaned = self.cleanup()?;
-        info!(
-            "{} references in {}",
-            self.seen.len().to_string().cyan(),
-            p2s(&self.topdir)
-        );
-        info!(
-            "newly registered: {}, cleaned: {}",
-            registered.to_string().green(),
-            cleaned.to_string().purple()
-        );
-        Ok(())
+    fn register_loop(&mut self) -> Result<()> {
+        match self.rx.take() {
+            Some(rx) => {
+                let registered = rx.iter()
+                    .map(|sp| self.register(&sp))
+                    .sum::<Result<usize>>()?;
+                let cleaned = self.cleanup()?;
+                info!(
+                    "total {} references in {}",
+                    self.seen.len().to_string().cyan(),
+                    p2s(&self.topdir)
+                );
+                info!(
+                    "newly registered: {}, cleaned: {}",
+                    registered.to_string().green(),
+                    cleaned.to_string().purple()
+                );
+                Ok(())
+            }
+            None => Ok(()),
+        }
+    }
+
+    fn tx(&mut self) -> GCRootsTx {
+        let (tx, rx) = mpsc::channel::<StorePaths>();
+        self.rx = Some(rx);
+        tx
     }
 }
 
+#[derive(Debug, Default)]
 pub struct NullGCRoots {
     output: Output,
+    rx: Option<GCRootsRx>,
 }
 
 impl NullGCRoots {
     pub fn new(output: &Output) -> Self {
-        NullGCRoots { output: output.clone() }
+        NullGCRoots {
+            output: output.clone(),
+            rx: None,
+        }
     }
 }
 
 impl Register for NullGCRoots {
-    fn register_loop(&mut self, rx: GcRootsRx) -> Result<()> {
-        for storepaths in rx {
-            self.output.print_store_paths(&storepaths)?;
+    fn register_loop(&mut self) -> Result<()> {
+        match self.rx.take() {
+            Some(ref rx) => {
+                for storepaths in rx {
+                    self.output.print_store_paths(&storepaths)?;
+                }
+                Ok(())
+            }
+            None => Ok(()),
         }
-        Ok(())
+    }
+
+    fn tx(&mut self) -> GCRootsTx {
+        let (tx, rx) = mpsc::channel::<StorePaths>();
+        self.rx = Some(rx);
+        tx
     }
 }
 
@@ -201,16 +233,11 @@ pub mod tests {
 
     fn _gcroots() -> (TempDir, GCRoots) {
         let tempdir = TempDir::new("gcroots").expect("failed to create gcroots tempdir");
-        let prefix = tempdir.path().to_owned();
-        (
-            tempdir,
-            GCRoots {
-                prefix: prefix,
-                topdir: PathBuf::from("/home/user/www"),
-                cwd: PathBuf::from("/home/user"),
-                ..GCRoots::default()
-            },
-        )
+        let mut gc = GCRoots::new("/", Path::new("/"), &Output::default()).unwrap();
+        gc.prefix = tempdir.path().to_owned();
+        gc.topdir = PathBuf::from("/home/user/www");
+        gc.cwd = PathBuf::from("/home/user");
+        (tempdir, gc)
     }
 
     fn is_symlink(p: &Path) -> bool {
@@ -292,33 +319,47 @@ pub mod tests {
     }
 
     /*
-     * passive GCRoots dummy to test walker/scanner
+     * passive GCRoots consumer to test walker/scanner
      */
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug)]
     pub struct FakeGCRoots {
         pub registered: Vec<String>,
+        rx: Option<GCRootsRx>,
     }
 
     impl FakeGCRoots {
         pub fn new() -> Self {
-            FakeGCRoots { registered: Vec::new() }
+            FakeGCRoots {
+                registered: Vec::new(),
+                rx: None,
+            }
         }
     }
 
     impl Register for FakeGCRoots {
-        fn register_loop(&mut self, rx: GcRootsRx) -> Result<()> {
-            for storepaths in rx {
-                for r in storepaths.refs() {
-                    self.registered.push(format!(
-                        "{}|{}",
-                        storepaths.path().display(),
-                        r.display()
-                    ));
+        fn register_loop(&mut self) -> Result<()> {
+            match self.rx.take() {
+                Some(ref rx) => {
+                    for storepaths in rx {
+                        for r in storepaths.refs() {
+                            self.registered.push(format!(
+                                "{}|{}",
+                                storepaths.path().display(),
+                                r.display()
+                            ));
+                        }
+                    }
+                    Ok(())
                 }
+                None => Ok(()),
             }
-            Ok(())
+        }
+
+        fn tx(&mut self) -> GCRootsTx {
+            let (tx, rx) = mpsc::channel::<StorePaths>();
+            self.rx = Some(rx);
+            tx
         }
     }
-
 }
