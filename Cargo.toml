@@ -1,6 +1,6 @@
 [package]
 name = "fc-userscan"
-version = "0.1.2"
+version = "0.1.3-dev"
 authors = ["Christian Kauhaus <kc@flyingcircus.io>"]
 description = """\
 Searches arbitrary directories for Nix store references and registers them \

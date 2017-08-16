@@ -79,7 +79,7 @@ fn walk(args: Arc<App>, cache: Arc<Cache>, stats: StatsTx, gc: GCRootsTx) -> Res
 fn spawn_threads(app: Arc<App>, gcroots: &mut Register) -> Result<Statistics> {
     let mut stats = app.statistics();
     let mut cache = Arc::new(app.cache()?);
-    info!("Scouting {} ...", p2s(&app.startdir));
+    info!("{}: Scouting {} ...", crate_name!(), p2s(&app.startdir));
 
     crossbeam::scope(|threads| -> Result<()> {
         let cache = cache.clone();

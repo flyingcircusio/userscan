@@ -65,23 +65,9 @@ impl Output {
             colored::control::set_override(v)
         }
         let fmt = |r: &LogRecord| match r.level() {
-            LogLevel::Error => {
-                format!(
-                    "{} {}: {}",
-                    crate_name!(),
-                    r.level().to_string().red().bold(),
-                    r.args()
-                )
-            }
-            LogLevel::Warn => {
-                format!(
-                    "{} {}: {}",
-                    crate_name!(),
-                    r.level().to_string().yellow(),
-                    r.args()
-                )
-            }
-            LogLevel::Info => format!("{}: {}", crate_name!(), r.args()),
+            LogLevel::Error => format!("{}: {}", r.level().to_string().red().bold(), r.args()),
+            LogLevel::Warn => format!("{}: {}", r.level().to_string().yellow(), r.args()),
+            LogLevel::Info => format!("{}", r.args()),
             _ => format!("{}", r.args().to_string().blue()),
         };
         LogBuilder::new()
@@ -119,6 +105,7 @@ impl Output {
     }
 }
 
+/// Path to String with coloring
 pub fn p2s<P: AsRef<Path>>(path: P) -> ColoredString {
     path.as_ref().display().to_string().green()
 }

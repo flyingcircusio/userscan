@@ -113,7 +113,7 @@ impl Default for App {
     fn default() -> Self {
         App {
             startdir: PathBuf::new(),
-            quickcheck: ByteSize::kib(64),
+            quickcheck: ByteSize::b(0),
             register: false,
             output: Output::default(),
             cachefile: None,
@@ -240,7 +240,7 @@ fn parse_args() -> App {
                 "quickcheck",
                 "Give up if no Nix store reference is found in the first <q> kbytes of a file",
             ).takes_value(true)
-                .default_value("64")
+                .default_value("1024")
                 .validator(|s: String| -> result::Result<(), String> {
                     s.parse::<u32>().map(|_| ()).map_err(|e| e.to_string())
                 }),
