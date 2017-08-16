@@ -18,7 +18,7 @@ fn process_direntry(
     stats: &StatsTx,
     gc: &GCRootsTx,
 ) -> Result<WalkState> {
-    let sp = match cache.lookup(dent) {
+    let mut sp = match cache.lookup(dent) {
         Lookup::Dir(sp) => sp,
         Lookup::Hit(sp) => sp,
         Lookup::Miss(d) => scanner.find_paths(d)?,
@@ -29,7 +29,7 @@ fn process_direntry(
             || ErrorKind::WalkAbort,
         )?;
     }
-    cache.insert(&sp)?;
+    cache.insert(&mut sp)?;
     stats.send(StatsMsg::Scan((&sp).into())).chain_err(|| {
         ErrorKind::WalkAbort
     })?;

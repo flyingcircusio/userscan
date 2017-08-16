@@ -7,6 +7,7 @@ use log::{LogLevel, LogLevelFilter, LogRecord};
 use std::io;
 use std::io::prelude::*;
 use std::path::Path;
+use std::time::Duration;
 
 pub fn fmt_error_chain(err: &Error) -> String {
     err.iter()
@@ -120,4 +121,11 @@ impl Output {
 
 pub fn p2s<P: AsRef<Path>>(path: P) -> ColoredString {
     path.as_ref().display().to_string().green()
+}
+
+/// Duration to seconds
+///
+/// Converts a time::Duration value into a floating-point seconds value.
+pub fn d2s(d: Duration) -> f32 {
+    d.as_secs() as f32 + (d.subsec_nanos() as f32) / 1e9
 }

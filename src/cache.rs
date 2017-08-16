@@ -27,15 +27,22 @@ pub struct StorePaths {
     refs: Vec<PathBuf>,
     cached: bool,
     bytes_scanned: u64,
+    metadata: Option<fs::Metadata>,
 }
 
 impl StorePaths {
-    pub fn new(dent: DirEntry, refs: Vec<PathBuf>, bytes_scanned: u64) -> Self {
+    pub fn new(
+        dent: DirEntry,
+        refs: Vec<PathBuf>,
+        bytes_scanned: u64,
+        metadata: Option<fs::Metadata>,
+    ) -> Self {
         StorePaths {
             dent,
             refs,
             bytes_scanned,
             cached: false,
+            metadata,
         }
     }
 
@@ -53,10 +60,17 @@ impl StorePaths {
         })
     }
 
-    pub fn metadata(&self) -> Result<fs::Metadata> {
-        self.dent.metadata().chain_err(|| {
-            ErrorKind::DentNoMetadata(self.path().to_path_buf())
-        })
+    pub fn metadata(&mut self) -> Result<fs::Metadata> {
+        match self.metadata {
+            Some(ref m) => Ok(m.clone()),
+            None => {
+                let m = self.dent.metadata().chain_err(|| {
+                    ErrorKind::DentNoMetadata(self.path().to_path_buf())
+                })?;
+                self.metadata = Some(m.clone());
+                Ok(m)
+            }
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -126,7 +140,7 @@ impl Cache {
     fn read(&mut self, file: &mut fs::File) -> Result<CacheMap> {
         file.seek(io::SeekFrom::Start(0))?;
         let path = self.filename.as_path();
-        let r = io::BufReader::new(file);
+        let r = io::BufReader::with_capacity(1 << 20, file);
         match path.extension() {
             Some(e) if e == OsStr::new("gz") => serde_json::from_reader(GzDecoder::new(r)?),
             _ => serde_json::from_reader(r),
@@ -138,22 +152,24 @@ impl Cache {
     pub fn open<P: AsRef<Path>>(mut self, path: P) -> Result<Self> {
         self.filename = path.as_ref().to_path_buf();
         info!("Loading cache {}", p2s(&self.filename));
-        let mut file = fs::OpenOptions::new()
+        let mut cachefile = fs::OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
             .open(&path)
             .chain_err(|| format!("failed to open cache file {}", p2s(&path)))?;
-        fcntl::flock(file.as_raw_fd(), fcntl::FlockArg::LockExclusiveNonblock)
-            .chain_err(|| {
-                format!(
-                    "failed to lock cache file {}: another instance running?",
-                    p2s(&path)
-                )
-            })?;
-        if file.metadata()?.len() > 0 {
-            self.map = RwLock::new(self.read(&mut file)?);
+        fcntl::flock(
+            cachefile.as_raw_fd(),
+            fcntl::FlockArg::LockExclusiveNonblock,
+        ).chain_err(|| {
+            format!(
+                "failed to lock cache file {}: another instance running?",
+                p2s(&path)
+            )
+        })?;
+        if cachefile.metadata()?.len() > 0 {
+            self.map = RwLock::new(self.read(&mut cachefile)?);
             self.dirty = AtomicBool::new(false);
             debug!(
                 "loaded {} entries from cache",
@@ -164,7 +180,7 @@ impl Cache {
             self.map.write().unwrap().clear();
             self.dirty = AtomicBool::new(true);
         }
-        self.file = Some(file);
+        self.file = Some(cachefile);
         Ok(self)
     }
 
@@ -179,7 +195,7 @@ impl Cache {
             debug!("writing {} entries to cache", map.len());
             file.seek(io::SeekFrom::Start(0))?;
             file.set_len(0)?;
-            let w = io::BufWriter::new(file);
+            let w = io::BufWriter::with_capacity(1 << 20, file);
             match path.extension() {
                 Some(e) if e == OsStr::new("gz") => {
                     serde_json::to_writer(GzEncoder::new(w, Compression::Fast), map.deref())
@@ -192,14 +208,14 @@ impl Cache {
         }
     }
 
-    fn get(&self, dent: &DirEntry) -> Result<Vec<PathBuf>> {
+    fn get(&self, dent: &DirEntry) -> Result<(Vec<PathBuf>, fs::Metadata)> {
         let ino = dent.ino().ok_or(ErrorKind::CacheNotFound)?;
         let mut map = self.map.write().unwrap();
         let c = map.get_mut(&ino).ok_or(ErrorKind::CacheNotFound)?;
         let meta = dent.metadata()?;
         if c.ctime == meta.ctime() && c.ctime_nsec == meta.ctime_nsec() {
             c.used = true;
-            Ok(c.refs.clone())
+            Ok((c.refs.clone(), meta))
         } else {
             Err(ErrorKind::CacheNotFound.into())
         }
@@ -213,17 +229,19 @@ impl Cache {
                     refs: vec![],
                     cached: true,
                     bytes_scanned: 0,
+                    metadata: None,
                 });
             }
         }
         match self.get(&dent) {
-            Ok(refs) => {
+            Ok((refs, metadata)) => {
                 self.hits.fetch_add(1, Ordering::Relaxed);
                 Lookup::Hit(StorePaths {
-                    dent: dent,
-                    refs: refs,
+                    dent,
+                    refs,
                     cached: true,
                     bytes_scanned: 0,
+                    metadata: Some(metadata),
                 })
             }
             Err(_) => {
@@ -233,7 +251,7 @@ impl Cache {
         }
     }
 
-    pub fn insert(&self, sp: &StorePaths) -> Result<()> {
+    pub fn insert(&self, sp: &mut StorePaths) -> Result<()> {
         if sp.cached {
             return Ok(());
         }
@@ -310,11 +328,12 @@ mod tests {
     fn insert_cacheline() {
         let c = Cache::new();
         let dent = tests::dent("dir1/proto-http.la");
-        c.insert(&StorePaths {
+        c.insert(&mut StorePaths {
             dent: dent,
             refs: vec![],
             cached: false,
             bytes_scanned: 0,
+            metadata: None,
         }).expect("insert failed");
         println!("Cache: {}", c.to_string());
 
@@ -338,6 +357,7 @@ mod tests {
             ],
             cached: false,
             bytes_scanned: 0,
+            metadata: None,
         }
     }
 
@@ -345,7 +365,7 @@ mod tests {
     fn lookup_should_miss_on_changed_metadata() {
         let c = Cache::new();
         let ino = tests::dent("dir2/lftp").ino().unwrap();
-        c.insert(&sp_dummy()).expect("insert failed");
+        c.insert(&mut sp_dummy()).expect("insert failed");
 
         match c.lookup(tests::dent("dir2/lftp")) {
             Hit(sp) => {
@@ -378,7 +398,7 @@ mod tests {
             assert!(!cl.used);
         }
 
-        c.insert(&sp_dummy()).unwrap();
+        c.insert(&mut sp_dummy()).unwrap();
         assert!(c.dirty.load(Ordering::SeqCst));
         // exactly the newly inserted cacheline should have the "used" flag set
         assert_eq!(
@@ -406,7 +426,7 @@ mod tests {
         let mut c = Cache::new().open(&file).unwrap();
         // open should create empty file
         assert_eq!(0, fs::metadata(&file).unwrap().len());
-        c.insert(&sp_dummy()).unwrap();
+        c.insert(&mut sp_dummy()).unwrap();
         c.commit().unwrap();
         assert_eq!("application/gzip", ::tree_magic::from_filepath(&file));
     }

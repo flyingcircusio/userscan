@@ -1,6 +1,8 @@
+use atty::{self, Stream};
 use ByteSize;
 use cache::StorePaths;
 use colored::Colorize;
+use output::d2s;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::time;
@@ -93,7 +95,11 @@ pub struct Statistics {
     rx: Option<mpsc::Receiver<StatsMsg>>,
     start: time::Instant,
     detailed: bool,
+    progress: bool,
+    progress_last: u64,
 }
+
+const SHOW_NOT_BEFORE: u64 = 5;
 
 impl Statistics {
     pub fn new(detailed: bool) -> Self {
@@ -105,10 +111,12 @@ impl Statistics {
             rx: None,
             start: time::Instant::now(),
             detailed,
+            progress: atty::is(Stream::Stderr),
+            progress_last: SHOW_NOT_BEFORE,
         }
     }
 
-    pub fn process(&mut self, msg: StatsMsg) {
+    fn process(&mut self, msg: StatsMsg) {
         match msg {
             StatsMsg::Scan(f) => {
                 self.total += f.scanned;
@@ -123,11 +131,31 @@ impl Statistics {
         }
     }
 
+    fn print_progress(&mut self) {
+        let elapsed = self.start.elapsed().as_secs();
+        if elapsed > self.progress_last {
+            let p = format!(
+                "Scanning in progress... {} files ({} read) in {} s",
+                self.total.files,
+                ByteSize::b(self.total.bytes as usize),
+                elapsed
+            );
+            eprint!("\r{}", p.purple());
+            self.progress_last = elapsed;
+        }
+    }
+
     pub fn receive_loop(&mut self) {
         match self.rx.take() {
             Some(rx) => {
                 for msg in rx {
-                    self.process(msg)
+                    self.process(msg);
+                    if self.progress {
+                        self.print_progress();
+                    }
+                }
+                if self.progress && self.progress_last > SHOW_NOT_BEFORE {
+                    eprintln!()
                 }
             }
             None => (),
@@ -146,12 +174,11 @@ impl Statistics {
 
     pub fn log_summary(&self) {
         let elapsed = self.start.elapsed();
-        let elapsed = elapsed.as_secs() as f64 + (elapsed.subsec_nanos() as f64) / 1e9;
         info!(
             "Processed {} files ({} read) in {:4.4}{}",
             self.total.files.to_string().cyan(),
             ByteSize::b(self.total.bytes as usize),
-            elapsed.to_string().cyan(),
+            d2s(elapsed).to_string().cyan(),
             " s".cyan()
         );
         if self.detailed {

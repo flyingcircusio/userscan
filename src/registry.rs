@@ -134,17 +134,14 @@ impl GCRoots {
             .map(|res: result::Result<DirEntry, ignore::Error>| {
                 let dent = res.chain_err(|| "clean up".to_owned())?;
                 let path = dent.path();
-                let meta = dent.metadata().chain_err(
-                    || format!("stat({}) failed", path.display()),
-                )?;
-                match meta.file_type() {
-                    ft if ft.is_dir() => {
+                match dent.file_type() {
+                    Some(ft) if ft.is_dir() => {
                         for _removed in fs::remove_dir(path) {
                             debug!("removing empty dir {}", path.display())
                         }
                         Ok(0)
                     }
-                    ft if ft.is_symlink() => {
+                    Some(ft) if ft.is_symlink() => {
                         if self.seen.contains(path) {
                             Ok(0)
                         } else {

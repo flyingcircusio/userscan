@@ -19,6 +19,11 @@ lazy_static! {
 
 const MIN_STOREREF_LEN: u64 = 45;
 
+struct ScanResult {
+    refs: Vec<PathBuf>,
+    meta: fs::Metadata,
+    bytes_scanned: u64,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct Scanner {
@@ -30,44 +35,71 @@ impl Scanner {
         Scanner { quickcheck: quickcheck }
     }
 
-    fn scan_regular(&self, dent: &DirEntry) -> Result<(Vec<PathBuf>, u64)> {
-        let len = dent.metadata()?.len();
-        if len < MIN_STOREREF_LEN {
+    fn scan_regular(&self, dent: &DirEntry) -> Result<ScanResult> {
+        let meta = dent.metadata()?;
+        if meta.len() < MIN_STOREREF_LEN {
             // minimum length to fit a single store reference not reached
-            return Ok((vec![], len));
+            let bytes_scanned = meta.len();
+            return Ok(ScanResult {
+                refs: vec![],
+                meta,
+                bytes_scanned,
+            });
         }
         debug!("scanning {}", dent.path().display());
         let mmap = Mmap::open_path(dent.path(), Protection::Read)?;
         let buf: &[u8] = unsafe { mmap.as_slice() };
         let cutoff = self.quickcheck as u64;
-        if cutoff > 0 && len > cutoff {
+        if cutoff > 0 && meta.len() > cutoff {
             if twoway::find_bytes(&buf[0..self.quickcheck], b"/nix/store/").is_none() {
-                return Ok((vec![], cutoff));
+                return Ok(ScanResult {
+                    refs: vec![],
+                    meta,
+                    bytes_scanned: cutoff,
+                });
             }
         }
-        Ok((
-            STORE_RE
+        let bytes_scanned = meta.len();
+        Ok(ScanResult {
+            refs: STORE_RE
                 .find_iter(&buf)
                 .map(|match_| OsStr::from_bytes(match_.as_bytes()).into())
                 .collect(),
-            len,
-        ))
+            meta,
+
+            bytes_scanned,
+        })
     }
 
-    fn scan_symlink(&self, dent: &DirEntry) -> Result<(Vec<PathBuf>, u64)> {
+    fn scan_symlink(&self, dent: &DirEntry) -> Result<ScanResult> {
         debug!("scanning {}", dent.path().display());
+        let meta = dent.metadata()?;
         let target = fs::read_link(dent.path())?;
         let len = target.as_os_str().len() as u64;
         if let Some(match_) = STORE_RE.find(&target.as_os_str().as_bytes()) {
-            Ok((vec![OsStr::from_bytes(match_.as_bytes()).into()], len))
+            Ok(ScanResult {
+                refs: vec![OsStr::from_bytes(match_.as_bytes()).into()],
+                meta,
+                bytes_scanned: len,
+            })
         } else {
-            Ok((vec![], len))
+            Ok(ScanResult {
+                refs: vec![],
+                meta,
+                bytes_scanned: len,
+            })
         }
     }
 
-    fn scan(&self, dent: &DirEntry) -> Result<(Vec<PathBuf>, u64)> {
+    fn scan(&self, dent: &DirEntry) -> Result<ScanResult> {
         match dent.error() {
-            Some(ref e) if !e.is_partial() => return Ok((vec![], 0)),
+            Some(ref e) if !e.is_partial() => {
+                return Ok(ScanResult {
+                    refs: vec![],
+                    meta: dent.metadata()?,
+                    bytes_scanned: 0,
+                })
+            }
             _ => (),
         }
         match dent.file_type() {
@@ -86,11 +118,10 @@ impl Scanner {
     }
 
     pub fn find_paths(&self, dent: DirEntry) -> Result<StorePaths> {
-        self.scan(&dent).map(|res| {
-            let (mut paths, bytes_scanned) = res;
-            paths.sort();
-            paths.dedup();
-            StorePaths::new(dent, paths, bytes_scanned)
+        self.scan(&dent).map(|mut res| {
+            res.refs.sort();
+            res.refs.dedup();
+            StorePaths::new(dent, res.refs, res.bytes_scanned, Some(res.meta))
         })
     }
 }
