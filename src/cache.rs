@@ -158,6 +158,11 @@ impl Cache {
     pub fn open<P: AsRef<Path>>(mut self, path: P) -> Result<Self> {
         self.filename = path.as_ref().to_path_buf();
         info!("Loading cache {}", p2s(&self.filename));
+        if let Some(p) = path.as_ref().parent() {
+            fs::create_dir_all(p).chain_err(|| {
+                format!("cache: failed to create leading directory {}", p2s(p))
+            })?;
+        }
         let mut cachefile = fs::OpenOptions::new()
             .read(true)
             .write(true)

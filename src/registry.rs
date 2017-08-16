@@ -43,7 +43,7 @@ pub trait Register {
 }
 
 impl GCRoots {
-    pub fn new(peruser: &str, startdir: &Path, output: &Output) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(peruser: &str, startdir: P, output: &Output) -> Result<Self> {
         let user = match get_current_username() {
             Some(u) => u,
             None => return Err("failed to query current user name".into()),
@@ -52,11 +52,8 @@ impl GCRoots {
         let cwd = env::current_dir().chain_err(
             || "failed to determine current dir",
         )?;
-        let startdir = startdir.canonicalize().chain_err(|| {
-            format!("start dir {} is not accessible", p2s(startdir))
-        })?;
         Ok(GCRoots {
-            topdir: prefix.join(startdir.strip_prefix("/").unwrap()),
+            topdir: prefix.join(startdir.as_ref().strip_prefix("/")?),
             prefix,
             cwd: cwd,
             output: output.to_owned(),

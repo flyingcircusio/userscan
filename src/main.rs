@@ -39,8 +39,9 @@ use errors::*;
 use output::{Output, p2s};
 use registry::{GCRoots, NullGCRoots, Register};
 use statistics::Statistics;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::result;
+use users::os::unix::UserExt;
 
 static GC_PREFIX: &str = "/nix/var/nix/gcroots/profiles/per-user";
 
@@ -55,12 +56,23 @@ pub struct App {
     sleep_us: u32,
 }
 
+fn canonical_startdir<P: AsRef<Path>>(startdir: P) -> Result<PathBuf> {
+    let s = startdir.as_ref();
+    if s.as_os_str().is_empty() {
+        Ok(
+            users::get_user_by_uid(users::get_effective_uid())
+                .ok_or("cannot determine current user")?
+                .home_dir()
+                .to_path_buf(),
+        )
+    } else {
+        s.canonicalize()
+    }.chain_err(|| format!("start dir {} is not accessible", p2s(&startdir)))
+}
+
 impl App {
     fn walker(&self) -> Result<ignore::WalkBuilder> {
-        let startdir = self.startdir.canonicalize().chain_err(|| {
-            format!("start dir {} is not accessible", p2s(&self.startdir))
-        })?;
-        let mut wb = ignore::WalkBuilder::new(&startdir);
+        let mut wb = ignore::WalkBuilder::new(canonical_startdir(&self.startdir)?);
         wb.parents(false)
             .git_exclude(false)
             .git_global(false)
@@ -75,9 +87,11 @@ impl App {
 
     fn gcroots(&self) -> Result<Box<Register>> {
         if self.register {
-            Ok(Box::new(
-                GCRoots::new(GC_PREFIX, &self.startdir, &self.output)?,
-            ))
+            Ok(Box::new(GCRoots::new(
+                GC_PREFIX,
+                canonical_startdir(&self.startdir)?,
+                &self.output,
+            )?))
         } else {
             Ok(Box::new(NullGCRoots::new(&self.output)))
         }
@@ -161,9 +175,7 @@ fn parse_args() -> App {
     clap::App::new(crate_name!())
         .version(crate_version!())
         .about(crate_description!())
-        .arg(Arg::with_name("DIRECTORY").required(true).help(
-            "Start scan in DIRECTORY",
-        ))
+        .arg(Arg::with_name("DIRECTORY").help("Start scan in DIRECTORY"))
         .arg(
             a("l", "list", "Shows files containing Nix store references").display_order(1),
         )
@@ -244,5 +256,16 @@ fn main() {
             std::process::exit(2)
         }
         Ok(exitcode) => std::process::exit(exitcode),
+    }
+}
+
+#[cfg(test)]
+pub mod test {
+    use super::*;
+
+    #[test]
+    fn startdir_should_default_to_home() {
+        let user = users::get_user_by_uid(users::get_current_uid()).unwrap();
+        assert_eq!(user.home_dir(), canonical_startdir("").unwrap());
     }
 }
