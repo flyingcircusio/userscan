@@ -1,6 +1,6 @@
 [package]
 name = "fc-userscan"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Christian Kauhaus <kc@flyingcircus.io>"]
 description = """\
 Searches arbitrary directories for Nix store references and registers them \
@@ -29,7 +29,6 @@ regex = "0.2"
 serde = "1"
 serde_derive = "1"
 serde_json = "1"
-tree_magic = "0.2"
 twoway = "0.1"
 users = "0.5"
 
@@ -39,3 +38,4 @@ default-features = false
 
 [dev-dependencies]
 tempdir = "0.3"
+tree_magic = "0.2"

@@ -9,10 +9,13 @@ use scan::Scanner;
 use statistics::{Statistics, StatsMsg, StatsTx};
 use std::ops::DerefMut;
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 use super::App;
 
 fn process_direntry(
     dent: DirEntry,
+    sleep: Duration,
     cache: &Cache,
     scanner: &Scanner,
     stats: &StatsTx,
@@ -21,7 +24,10 @@ fn process_direntry(
     let mut sp = match cache.lookup(dent) {
         Lookup::Dir(sp) => sp,
         Lookup::Hit(sp) => sp,
-        Lookup::Miss(d) => scanner.find_paths(d)?,
+        Lookup::Miss(d) => {
+            thread::sleep(sleep);
+            scanner.find_paths(d)?
+        }
     };
     if let Some(err) = sp.error() {
         warn!("{}", err);
@@ -42,6 +48,7 @@ fn process_direntry(
 fn walk(args: Arc<App>, cache: Arc<Cache>, stats: StatsTx, gc: GCRootsTx) -> Result<()> {
     args.walker()?.build_parallel().run(|| {
         let scanner = args.scanner();
+        let sleep = Duration::new(0, args.sleep_us * 1000);
         let cache = cache.clone();
         let stats = stats.clone();
         let gc = gc.clone();
@@ -50,7 +57,9 @@ fn walk(args: Arc<App>, cache: Arc<Cache>, stats: StatsTx, gc: GCRootsTx) -> Res
             ignore::Error,
         >| {
             res.map_err(From::from)
-                .and_then(|dent| process_direntry(dent, &cache, &scanner, &stats, &gc))
+                .and_then(|dent| {
+                    process_direntry(dent, sleep, &cache, &scanner, &stats, &gc)
+                })
                 .unwrap_or_else(|err: Error| match err {
                     Error(ErrorKind::WalkContinue, _) => WalkState::Continue,
                     Error(ErrorKind::WalkAbort, _) => WalkState::Quit,

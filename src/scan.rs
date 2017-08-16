@@ -32,9 +32,10 @@ pub struct Scanner {
 
 impl Scanner {
     pub fn new(quickcheck: usize) -> Self {
-        Scanner { quickcheck: quickcheck }
+        Scanner { quickcheck }
     }
 
+    // # FIXME split into smaller methods
     fn scan_regular(&self, dent: &DirEntry) -> Result<ScanResult> {
         let meta = dent.metadata()?;
         if meta.len() < MIN_STOREREF_LEN {
@@ -66,7 +67,6 @@ impl Scanner {
                 .map(|match_| OsStr::from_bytes(match_.as_bytes()).into())
                 .collect(),
             meta,
-
             bytes_scanned,
         })
     }
@@ -76,19 +76,15 @@ impl Scanner {
         let meta = dent.metadata()?;
         let target = fs::read_link(dent.path())?;
         let len = target.as_os_str().len() as u64;
-        if let Some(match_) = STORE_RE.find(&target.as_os_str().as_bytes()) {
-            Ok(ScanResult {
-                refs: vec![OsStr::from_bytes(match_.as_bytes()).into()],
-                meta,
-                bytes_scanned: len,
-            })
-        } else {
-            Ok(ScanResult {
-                refs: vec![],
-                meta,
-                bytes_scanned: len,
-            })
-        }
+        let refs = match STORE_RE.find(&target.as_os_str().as_bytes()) {
+            Some(match_) => vec![OsStr::from_bytes(match_.as_bytes()).into()],
+            None => vec![],
+        };
+        Ok(ScanResult {
+            refs,
+            meta,
+            bytes_scanned: len,
+        })
     }
 
     fn scan(&self, dent: &DirEntry) -> Result<ScanResult> {
@@ -118,10 +114,10 @@ impl Scanner {
     }
 
     pub fn find_paths(&self, dent: DirEntry) -> Result<StorePaths> {
-        self.scan(&dent).map(|mut res| {
-            res.refs.sort();
-            res.refs.dedup();
-            StorePaths::new(dent, res.refs, res.bytes_scanned, Some(res.meta))
+        self.scan(&dent).map(|mut r| {
+            r.refs.sort();
+            r.refs.dedup();
+            StorePaths::new(dent, r.refs, r.bytes_scanned, Some(r.meta))
         })
     }
 }

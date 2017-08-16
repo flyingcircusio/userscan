@@ -7,7 +7,6 @@ extern crate ignore;
 extern crate nix;
 extern crate serde;
 extern crate serde_json;
-extern crate tree_magic;
 extern crate users;
 #[macro_use]
 extern crate clap;
@@ -53,6 +52,7 @@ pub struct App {
     output: Output,
     cachefile: Option<PathBuf>,
     detailed_statistics: bool,
+    sleep_us: u32,
 }
 
 impl App {
@@ -104,6 +104,7 @@ impl Default for App {
             output: Output::default(),
             cachefile: None,
             detailed_statistics: false,
+            sleep_us: 0,
         }
     }
 }
@@ -121,19 +122,20 @@ impl<'a> From<ArgMatches<'a>> for App {
         App {
             startdir: a.value_of_os("DIRECTORY").unwrap_or_default().into(),
             quickcheck: ByteSize::kib(a.value_of_lossy("q").unwrap().parse::<usize>().unwrap()),
+            output,
             register: !a.is_present("R"),
             cachefile: a.value_of_os("CACHEFILE").map(PathBuf::from),
-            detailed_statistics: a.is_present("s"),
-            output,
+            detailed_statistics: a.is_present("S"),
+            sleep_us: a.value_of("SLEEP_US")
+                .unwrap_or("0")
+                .parse::<u32>()
+                .unwrap(),
         }
     }
 }
 
 fn parse_args() -> App {
     let a = |short, long, help| Arg::with_name(short).short(short).long(long).help(help);
-    let kb_val = |s: String| -> result::Result<(), String> {
-        s.parse::<u32>().map(|_| ()).map_err(|e| e.to_string())
-    };
     let cachefile_val = |s: String| -> result::Result<(), String> {
         if s.ends_with(".json") || s.ends_with("json.gz") {
             Ok(())
@@ -143,6 +145,16 @@ fn parse_args() -> App {
                 p2s(".json"),
                 p2s(".json.gz")
             ))
+        }
+    };
+    let sleep_val = |s: String| -> result::Result<(), String> {
+        let val = s.parse::<u64>().map_err(|e| e.to_string())?;
+        if val < 1_000_000 {
+            Ok(())
+        } else {
+            Err(
+                "who wants to sleep longer than 1 second per file?".to_owned(),
+            )
         }
     };
 
@@ -159,7 +171,8 @@ fn parse_args() -> App {
             Arg::with_name("CACHEFILE")
                 .short("c")
                 .long("cache")
-                .help(
+                .help("Keep results between runs in CACHEFILE (JSON)")
+                .long_help(
                     "Caches scan results in CACHEFILE to avoid re-scanning unchanged files. \
                      File extension must be one of `.json` or `.json.gz`.",
                 )
@@ -189,10 +202,20 @@ fn parse_args() -> App {
                 ),
         )
         .arg(a(
-            "s",
+            "S",
             "statistics",
             "Prints detailed statistics like scans per file type.",
         ))
+        .arg(
+            Arg::with_name("SLEEP_US")
+                .short("s")
+                .long("stutter")
+                .help(
+                    "Sleep so many microseconds after each file to limit I/O load.",
+                )
+                .takes_value(true)
+                .validator(sleep_val),
+        )
         .arg(a("v", "verbose", "Additional output"))
         .arg(a(
             "d",
@@ -206,7 +229,9 @@ fn parse_args() -> App {
                 "Give up if no Nix store reference is found in the first <q> kbytes of a file",
             ).takes_value(true)
                 .default_value("64")
-                .validator(kb_val),
+                .validator(|s: String| -> result::Result<(), String> {
+                    s.parse::<u32>().map(|_| ()).map_err(|e| e.to_string())
+                }),
         )
         .get_matches()
         .into()

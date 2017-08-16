@@ -46,14 +46,17 @@ impl StorePaths {
         }
     }
 
+    #[inline]
     pub fn path(&self) -> &Path {
         self.dent.path()
     }
 
+    #[inline]
     pub fn error(&self) -> Option<&ignore::Error> {
         self.dent.error()
     }
 
+    #[inline]
     pub fn ino(&self) -> Result<u64> {
         self.dent.ino().ok_or_else(|| {
             ErrorKind::DentNoMetadata(self.path().to_path_buf()).into()
@@ -73,10 +76,12 @@ impl StorePaths {
         }
     }
 
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.refs.is_empty()
     }
 
+    #[inline]
     pub fn iter_refs<'a>(&'a self) -> Box<Iterator<Item = &Path> + 'a> {
         Box::new(self.refs.iter().map(|p| p.as_path()))
     }
@@ -86,6 +91,7 @@ impl StorePaths {
         &self.refs
     }
 
+    #[inline]
     pub fn bytes_scanned(&self) -> u64 {
         self.bytes_scanned
     }
@@ -318,6 +324,8 @@ impl ToString for Cache {
 
 #[cfg(test)]
 mod tests {
+    extern crate tree_magic;
+
     use std::fs;
     use super::*;
     use super::Lookup::*;
@@ -387,7 +395,7 @@ mod tests {
     }
 
     #[test]
-    fn load_save_cache_json_roundtrip() {
+    fn load_save_cache_roundtrip() {
         let td = TempDir::new("load_cache_json").unwrap();
         let cache_file = td.path().join("cache.json");
         fs::copy(FIXTURES.join("cache.json"), &cache_file).unwrap();
@@ -416,7 +424,7 @@ mod tests {
         assert_eq!(1, c.len());
         let json_len = fs::metadata(&cache_file).unwrap().len();
         println!("json_len: {}", json_len);
-        assert!(json_len >= 121 && json_len <= 123);
+        assert_eq!(json_len, 122);
     }
 
     #[test]
@@ -428,6 +436,6 @@ mod tests {
         assert_eq!(0, fs::metadata(&file).unwrap().len());
         c.insert(&mut sp_dummy()).unwrap();
         c.commit().unwrap();
-        assert_eq!("application/gzip", ::tree_magic::from_filepath(&file));
+        assert_eq!("application/gzip", tree_magic::from_filepath(&file));
     }
 }
