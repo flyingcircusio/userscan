@@ -8,13 +8,19 @@ use registry::{Register, GCRootsTx};
 use scan::Scanner;
 use statistics::{Statistics, StatsMsg, StatsTx};
 use std::ops::DerefMut;
+use std::os::linux::fs::MetadataExt;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use super::App;
 
+/// Scans a single DirEntry.
+///
+/// The cache is queried first. Results (scanned or cached) are sent to the registry and statistics
+/// collector.
 fn process_direntry(
     dent: DirEntry,
+    startdev: u64,
     sleep: Duration,
     cache: &Cache,
     scanner: &Scanner,
@@ -35,6 +41,9 @@ fn process_direntry(
             || ErrorKind::WalkAbort,
         )?;
     }
+    if sp.metadata()?.st_dev() != startdev {
+        return Ok(WalkState::Skip);
+    }
     cache.insert(&mut sp)?;
     stats.send(StatsMsg::Scan((&sp).into())).chain_err(|| {
         ErrorKind::WalkAbort
@@ -45,7 +54,9 @@ fn process_direntry(
     Ok(WalkState::Continue)
 }
 
+// XXX refactor: need own Walker object that bundles all relevant pointers
 fn walk(args: Arc<App>, cache: Arc<Cache>, stats: StatsTx, gc: GCRootsTx) -> Result<()> {
+    let startdev = args.start_meta()?.st_dev();
     args.walker()?.build_parallel().run(|| {
         let scanner = args.scanner();
         let sleep = Duration::new(0, args.sleep_us * 1000);
@@ -58,7 +69,7 @@ fn walk(args: Arc<App>, cache: Arc<Cache>, stats: StatsTx, gc: GCRootsTx) -> Res
         >| {
             res.map_err(From::from)
                 .and_then(|dent| {
-                    process_direntry(dent, sleep, &cache, &scanner, &stats, &gc)
+                    process_direntry(dent, startdev, sleep, &cache, &scanner, &stats, &gc)
                 })
                 .unwrap_or_else(|err: Error| match err {
                     Error(ErrorKind::WalkContinue, _) => WalkState::Continue,

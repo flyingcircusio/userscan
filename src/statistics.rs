@@ -184,7 +184,7 @@ impl Statistics {
     pub fn log_summary(&self) {
         let elapsed = self.start.elapsed();
         info!(
-            "Processed {} files ({} read) in {:4.4}{}",
+            "Processed {} files ({} read) in {:5.5}{}",
             self.total.files.to_string().cyan(),
             ByteSize::b(self.total.bytes as usize),
             d2s(elapsed).to_string().cyan(),

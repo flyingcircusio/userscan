@@ -39,6 +39,7 @@ use errors::*;
 use output::{Output, p2s};
 use registry::{GCRoots, NullGCRoots, Register};
 use statistics::Statistics;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::result;
 use users::os::unix::UserExt;
@@ -106,6 +107,13 @@ impl App {
 
     fn statistics(&self) -> Statistics {
         Statistics::new(self.detailed_statistics)
+    }
+
+    /// The Metadata entry of the start directory.
+    ///
+    /// Needed for crossdev detection.
+    fn start_meta(&self) -> Result<fs::Metadata> {
+        fs::metadata(canonical_startdir(&self.startdir)?).map_err(|e| e.into())
     }
 }
 
@@ -240,7 +248,7 @@ fn parse_args() -> App {
                 "quickcheck",
                 "Give up if no Nix store reference is found in the first <q> kbytes of a file",
             ).takes_value(true)
-                .default_value("1024")
+                .default_value("512")
                 .validator(|s: String| -> result::Result<(), String> {
                     s.parse::<u32>().map(|_| ()).map_err(|e| e.to_string())
                 }),
