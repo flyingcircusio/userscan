@@ -273,7 +273,7 @@ pub mod test {
 
     #[test]
     fn startdir_should_default_to_home() {
-        let user = users::get_user_by_uid(users::get_current_uid()).unwrap();
+        let user = users::get_user_by_uid(users::get_effective_uid()).unwrap();
         assert_eq!(user.home_dir(), canonical_startdir("").unwrap());
     }
 }

@@ -13,7 +13,7 @@ use std::os::unix::prelude::*;
 use std::path::{Path, PathBuf};
 use std::result;
 use std::sync::mpsc;
-use users::get_current_username;
+use users::get_effective_username;
 
 pub type GCRootsTx = mpsc::Sender<StorePaths>;
 pub type GCRootsRx = mpsc::Receiver<StorePaths>;
@@ -44,7 +44,7 @@ pub trait Register {
 
 impl GCRoots {
     pub fn new<P: AsRef<Path>>(peruser: &str, startdir: P, output: &Output) -> Result<Self> {
-        let user = match get_current_username() {
+        let user = match get_effective_username() {
             Some(u) => u,
             None => return Err("failed to query current user name".into()),
         };
@@ -122,11 +122,12 @@ impl GCRoots {
             return Ok(0);
         }
         WalkBuilder::new(&self.topdir)
-            .parents(false)
-            .ignore(false)
+            .git_exclude(false)
             .git_global(false)
             .git_ignore(false)
-            .git_exclude(false)
+            .hidden(true)
+            .ignore(false)
+            .parents(false)
             .build()
             .map(|res: result::Result<DirEntry, ignore::Error>| {
                 let dent = res.chain_err(|| "clean up".to_owned())?;
