@@ -40,6 +40,7 @@ use output::{Output, p2s};
 use registry::{GCRoots, NullGCRoots, Register};
 use statistics::Statistics;
 use std::fs;
+use std::ops::DerefMut;
 use std::path::{Path, PathBuf};
 use std::result;
 use users::os::unix::UserExt;
@@ -114,6 +115,15 @@ impl App {
     /// Needed for crossdev detection.
     fn start_meta(&self) -> Result<fs::Metadata> {
         fs::metadata(canonical_startdir(&self.startdir)?).map_err(|e| e.into())
+    }
+
+    pub fn run(&self) -> Result<i32> {
+        info!("{}: Scouting {} ...", crate_name!(), p2s(&self.startdir));
+        match walk::spawn_threads(self, self.gcroots()?.deref_mut())?
+            .softerrors() {
+            0 => Ok(0),
+            _ => Ok(1),
+        }
     }
 }
 
@@ -258,7 +268,7 @@ fn parse_args() -> App {
 }
 
 fn main() {
-    match walk::run(parse_args()) {
+    match parse_args().run() {
         Err(ref err) => {
             error!("{}", output::fmt_error_chain(err));
             std::process::exit(2)

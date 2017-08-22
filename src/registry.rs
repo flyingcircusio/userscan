@@ -125,7 +125,7 @@ impl GCRoots {
             .git_exclude(false)
             .git_global(false)
             .git_ignore(false)
-            .hidden(true)
+            .hidden(false)
             .ignore(false)
             .parents(false)
             .build()

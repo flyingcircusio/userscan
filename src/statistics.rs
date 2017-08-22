@@ -111,6 +111,10 @@ impl Statistics {
         }
     }
 
+    pub fn softerrors(&self) -> usize {
+        self.softerrors
+    }
+
     fn process(&mut self, msg: StatsMsg) {
         match msg {
             StatsMsg::Scan(f) => {

@@ -2,120 +2,118 @@ extern crate crossbeam;
 
 use cache::{Cache, Lookup};
 use errors::*;
-use ignore::{self, DirEntry, WalkState};
-use output::{p2s, fmt_error_chain};
+use ignore::{self, DirEntry, WalkState, WalkParallel};
+use output::fmt_error_chain;
 use registry::{Register, GCRootsTx};
 use scan::Scanner;
 use statistics::{Statistics, StatsMsg, StatsTx};
-use std::ops::DerefMut;
 use std::os::linux::fs::MetadataExt;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use super::App;
 
-/// Scans a single DirEntry.
-///
-/// The cache is queried first. Results (scanned or cached) are sent to the registry and statistics
-/// collector.
-fn process_direntry(
-    dent: DirEntry,
+#[derive(Clone)]
+struct ProcessingContext {
     startdev: u64,
     sleep: Duration,
-    cache: &Cache,
-    scanner: &Scanner,
-    stats: &StatsTx,
-    gc: &GCRootsTx,
-) -> Result<WalkState> {
-    let mut sp = match cache.lookup(dent) {
-        Lookup::Dir(sp) => sp,
-        Lookup::Hit(sp) => sp,
-        Lookup::Miss(d) => {
-            thread::sleep(sleep);
-            scanner.find_paths(d)?
-        }
-    };
-    if let Some(err) = sp.error() {
-        warn!("{}", err);
-        stats.send(StatsMsg::SoftError).chain_err(
-            || ErrorKind::WalkAbort,
-        )?;
-    }
-    if sp.metadata()?.st_dev() != startdev {
-        return Ok(WalkState::Skip);
-    }
-    cache.insert(&mut sp)?;
-    stats.send(StatsMsg::Scan((&sp).into())).chain_err(|| {
-        ErrorKind::WalkAbort
-    })?;
-    if !sp.is_empty() {
-        gc.send(sp).chain_err(|| ErrorKind::WalkAbort)?;
-    }
-    Ok(WalkState::Continue)
+    cache: Arc<Cache>,
+    scanner: Arc<Scanner>,
+    stats: StatsTx,
+    gc: GCRootsTx,
 }
 
-// XXX refactor: need own Walker object that bundles all relevant pointers
-fn walk(args: Arc<App>, cache: Arc<Cache>, stats: StatsTx, gc: GCRootsTx) -> Result<()> {
-    let startdev = args.start_meta()?.st_dev();
-    args.walker()?.build_parallel().run(|| {
-        let scanner = args.scanner();
-        let sleep = Duration::new(0, args.sleep_us * 1000);
-        let cache = cache.clone();
-        let stats = stats.clone();
-        let gc = gc.clone();
-        Box::new(move |res: ::std::result::Result<
-            DirEntry,
-            ignore::Error,
-        >| {
-            res.map_err(From::from)
-                .and_then(|dent| {
-                    process_direntry(dent, startdev, sleep, &cache, &scanner, &stats, &gc)
-                })
-                .unwrap_or_else(|err: Error| match err {
-                    Error(ErrorKind::WalkContinue, _) => WalkState::Continue,
-                    Error(ErrorKind::WalkAbort, _) => WalkState::Quit,
-                    _ => {
-                        warn!("{}", fmt_error_chain(&err));
-                        match stats.send(StatsMsg::SoftError) {
-                            Err(_) => WalkState::Quit, // IPC broken
-                            Ok(_) => WalkState::Continue,
-                        }
-                    }
-                })
+impl ProcessingContext {
+    fn create(app: &App, stats: &mut Statistics, gcroots: &mut Register) -> Result<Self> {
+        Ok(Self {
+            startdev: app.start_meta()?.st_dev(),
+            sleep: Duration::from_millis(app.sleep_us as u64 * 1000),
+            cache: Arc::new(app.cache()?),
+            scanner: Arc::new(app.scanner()),
+            stats: stats.tx(),
+            gc: gcroots.tx(),
         })
-    });
-    Ok(())
+    }
+
+    /// Scans a single DirEntry.
+    ///
+    /// The cache is queried first. Results (scanned or cached) are sent to the registry and
+    /// statistics collector.
+    fn process_direntry(&self, dent: DirEntry) -> Result<WalkState> {
+        let mut sp = match self.cache.lookup(dent) {
+            Lookup::Dir(sp) => sp,
+            Lookup::Hit(sp) => sp,
+            Lookup::Miss(d) => {
+                thread::sleep(self.sleep);
+                self.scanner.find_paths(d)?
+            }
+        };
+        if let Some(err) = sp.error() {
+            warn!("{}", err);
+            self.stats.send(StatsMsg::SoftError).chain_err(
+                || ErrorKind::WalkAbort,
+            )?;
+        }
+        if sp.metadata()?.st_dev() != self.startdev {
+            return Ok(WalkState::Skip);
+        }
+        self.cache.insert(&mut sp)?;
+        self.stats.send(StatsMsg::Scan((&sp).into())).chain_err(
+            || {
+                ErrorKind::WalkAbort
+            },
+        )?;
+        if !sp.is_empty() {
+            self.gc.send(sp).chain_err(|| ErrorKind::WalkAbort)?;
+        }
+        Ok(WalkState::Continue)
+    }
+
+    /// Walks through a directory hierachy and processes each found DirEntry.
+    fn walk(self, walker: WalkParallel) -> Result<Arc<Cache>> {
+        walker.run(|| {
+            let pctx = self.clone();
+            Box::new(move |res: ::std::result::Result<
+                DirEntry,
+                ignore::Error,
+            >| {
+                res.map_err(From::from)
+                    .and_then(|dent| pctx.process_direntry(dent))
+                    .unwrap_or_else(|err: Error| match err {
+                        Error(ErrorKind::WalkContinue, _) => WalkState::Continue,
+                        Error(ErrorKind::WalkAbort, _) => WalkState::Quit,
+                        _ => {
+                            warn!("{}", fmt_error_chain(&err));
+                            match pctx.stats.send(StatsMsg::SoftError) {
+                                Err(_) => WalkState::Quit, // IPC broken
+                                Ok(_) => WalkState::Continue,
+                            }
+                        }
+                    })
+            })
+        });
+        Ok(self.cache)
+    }
 }
 
-fn spawn_threads(app: Arc<App>, gcroots: &mut Register) -> Result<Statistics> {
+pub fn spawn_threads(app: &App, gcroots: &mut Register) -> Result<Statistics> {
     let mut stats = app.statistics();
-    let mut cache = Arc::new(app.cache()?);
-    info!("{}: Scouting {} ...", crate_name!(), p2s(&app.startdir));
-
-    crossbeam::scope(|threads| -> Result<()> {
-        let cache = cache.clone();
-        let stats_tx = stats.tx();
-        let gcroots_tx = gcroots.tx();
-        let walk = threads.spawn(move || walk(app.clone(), cache, stats_tx, gcroots_tx));
+    let mut cache = crossbeam::scope(|threads| -> Result<Arc<Cache>> {
+        let pctx = ProcessingContext::create(app, &mut stats, gcroots)?;
+        let walker = app.walker()?.build_parallel();
+        let walk_hdl = threads.spawn(move || pctx.walk(walker));
         threads.spawn(|| stats.receive_loop());
         gcroots.register_loop()?;
-        walk.join()
+        walk_hdl.join()
     })?;
-    let mut cache = Arc::get_mut(&mut cache).expect("BUG: pending references to cache object");
-    cache.commit()?;
+    Arc::get_mut(&mut cache)
+        .expect("BUG: dangling references to cache")
+        .commit()?;
     cache.log_statistics();
     stats.log_summary();
     Ok(stats)
 }
 
-pub fn run(app: App) -> Result<i32> {
-    let mut gcroots = app.gcroots()?;
-    let stats = spawn_threads(Arc::new(app), gcroots.deref_mut())?;
-    match stats.softerrors {
-        0 => Ok(0),
-        _ => Ok(1),
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -132,7 +130,7 @@ mod tests {
     #[test]
     fn walk_fixture_dir1() {
         let mut gcroots = registry::tests::FakeGCRoots::new(&*FIXTURES);
-        let stats = spawn_threads(Arc::new(app("dir1")), &mut gcroots).unwrap();
+        let stats = spawn_threads(&app("dir1"), &mut gcroots).unwrap();
         assert_eq_vecs(
             gcroots.registered,
             |s| s.to_owned(),
@@ -176,12 +174,23 @@ mod tests {
         writeln!(File::create(&borked_ignore).unwrap(), "pattern[*").unwrap();
 
         let mut gcroots = registry::tests::FakeGCRoots::new(t.path());
-        let stats = spawn_threads(Arc::new(app(t.path())), &mut gcroots).unwrap();
+        let stats = spawn_threads(&app(t.path()), &mut gcroots).unwrap();
         println!("registered GC roots: {:?}", gcroots.registered);
         assert_eq!(gcroots.registered.len(), 1);
         assert_eq!(stats.softerrors, 3);
 
         // otherwise it won't clean up
         set_permissions(&unreadable_d, Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn should_not_cross_devices() {
+        let mut gcroots = registry::tests::FakeGCRoots::new(&*FIXTURES);
+        let app = app("dir1");
+        let mut stats = app.statistics();
+        let mut pctx = ProcessingContext::create(&app, &mut stats, &mut gcroots).unwrap();
+        pctx.startdev = 0;
+        let dent = app.walker().unwrap().build().next().unwrap().unwrap();
+        assert_eq!(WalkState::Skip, pctx.process_direntry(dent).unwrap());
     }
 }
