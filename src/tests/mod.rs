@@ -46,3 +46,7 @@ pub fn dent<P: AsRef<Path>>(path: P) -> ignore::DirEntry {
         .unwrap_or_else(|| panic!("didn't find path: {}", path.as_ref().display()))
         .unwrap_or_else(|e| panic!("unable to read path: {}", e))
 }
+
+pub fn fake_gc() -> ::registry::tests::FakeGCRoots {
+    ::registry::tests::FakeGCRoots::new(&*FIXTURES)
+}

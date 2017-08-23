@@ -60,7 +60,7 @@ impl Output {
         }
     }
 
-    pub fn log_init(self) -> Self {
+    pub fn log_init(&self) {
         if let Some(v) = self.color {
             colored::control::set_override(v)
         }
@@ -75,14 +75,13 @@ impl Output {
             .filter(None, self.level)
             .init()
             .expect("log init may only be called once");
-        self
     }
 
     pub fn write_store_paths(&self, w: &mut Write, sp: &StorePaths) -> io::Result<()> {
         let filename = format!(
             "{}{}",
             sp.path().display(),
-            if sp.is_empty() { "" } else { ":" }
+            if self.oneline { ":" } else { "" }
         );
         write!(w, "{}", filename.purple().bold())?;
         let sep = if self.oneline { " " } else { "\n" };

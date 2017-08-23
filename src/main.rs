@@ -36,9 +36,12 @@ use cache::Cache;
 use bytesize::ByteSize;
 use clap::{Arg, ArgMatches};
 use errors::*;
+use ignore::overrides::OverrideBuilder;
 use output::{Output, p2s};
 use registry::{GCRoots, NullGCRoots, Register};
 use statistics::Statistics;
+use std::borrow::Cow;
+use std::ffi::OsStr;
 use std::fs;
 use std::ops::DerefMut;
 use std::path::{Path, PathBuf};
@@ -46,17 +49,6 @@ use std::result;
 use users::os::unix::UserExt;
 
 static GC_PREFIX: &str = "/nix/var/nix/gcroots/profiles/per-user";
-
-#[derive(Debug, Clone)]
-pub struct App {
-    startdir: PathBuf,
-    quickcheck: ByteSize,
-    register: bool,
-    output: Output,
-    cachefile: Option<PathBuf>,
-    detailed_statistics: bool,
-    sleep_us: u32,
-}
 
 fn canonical_startdir<P: AsRef<Path>>(startdir: P) -> Result<PathBuf> {
     let s = startdir.as_ref();
@@ -72,13 +64,32 @@ fn canonical_startdir<P: AsRef<Path>>(startdir: P) -> Result<PathBuf> {
     }.chain_err(|| format!("start dir {} is not accessible", p2s(&startdir)))
 }
 
+#[derive(Debug, Clone)]
+pub struct App {
+    startdir: PathBuf,
+    quickcheck: ByteSize,
+    register: bool,
+    output: Output,
+    cachefile: Option<PathBuf>,
+    detailed_statistics: bool,
+    sleep_us: u32,
+    overrides: Vec<String>,
+}
+
 impl App {
     fn walker(&self) -> Result<ignore::WalkBuilder> {
-        let mut wb = ignore::WalkBuilder::new(canonical_startdir(&self.startdir)?);
+        let startdir = self.startdir()?;
+        let mut ov = OverrideBuilder::new(&startdir);
+        for o in self.overrides.iter() {
+            let _ = ov.add(o)?;
+        }
+        let mut wb = ignore::WalkBuilder::new(startdir);
         wb.parents(false)
             .git_exclude(false)
             .git_global(false)
             .git_ignore(false)
+            .ignore(false)
+            .overrides(ov.build()?)
             .hidden(false);
         Ok(wb)
     }
@@ -89,11 +100,9 @@ impl App {
 
     fn gcroots(&self) -> Result<Box<Register>> {
         if self.register {
-            Ok(Box::new(GCRoots::new(
-                GC_PREFIX,
-                canonical_startdir(&self.startdir)?,
-                &self.output,
-            )?))
+            Ok(Box::new(
+                GCRoots::new(GC_PREFIX, self.startdir()?, &self.output)?,
+            ))
         } else {
             Ok(Box::new(NullGCRoots::new(&self.output)))
         }
@@ -110,14 +119,19 @@ impl App {
         Statistics::new(self.detailed_statistics)
     }
 
+    fn startdir(&self) -> Result<PathBuf> {
+        canonical_startdir(&self.startdir)
+    }
+
     /// The Metadata entry of the start directory.
     ///
     /// Needed for crossdev detection.
     fn start_meta(&self) -> Result<fs::Metadata> {
-        fs::metadata(canonical_startdir(&self.startdir)?).map_err(|e| e.into())
+        fs::metadata(self.startdir()?).map_err(|e| e.into())
     }
 
     pub fn run(&self) -> Result<i32> {
+        self.output.log_init();
         info!("{}: Scouting {} ...", crate_name!(), p2s(&self.startdir));
         match walk::spawn_threads(self, self.gcroots()?.deref_mut())?
             .softerrors() {
@@ -137,6 +151,7 @@ impl Default for App {
             cachefile: None,
             detailed_statistics: false,
             sleep_us: 0,
+            overrides: vec![],
         }
     }
 }
@@ -144,30 +159,41 @@ impl Default for App {
 impl<'a> From<ArgMatches<'a>> for App {
     fn from(a: ArgMatches) -> Self {
         let output = Output::new(
-            a.is_present("v"),
-            a.is_present("d"),
-            a.is_present("1"),
-            a.value_of("C"),
-            a.is_present("l") || a.is_present("R"),
-        ).log_init();
+            a.is_present("verbose"),
+            a.is_present("debug"),
+            a.is_present("oneline"),
+            a.value_of("color"),
+            a.is_present("list") || a.is_present("no-register"),
+        );
+
+        let mut overrides: Vec<String> = vec![];
+        if let Some(excl) = a.values_of("exclude") {
+            overrides.extend(excl.map(|e| format!("!{}", e)))
+        }
+        if let Some(incl) = a.values_of("include") {
+            overrides.extend(incl.map(|i| i.to_owned()))
+        }
 
         App {
-            startdir: a.value_of_os("DIRECTORY").unwrap_or_default().into(),
-            quickcheck: ByteSize::kib(a.value_of_lossy("q").unwrap().parse::<usize>().unwrap()),
+            startdir: a.value_of_os("DIRECTORY").unwrap_or(OsStr::new(".")).into(),
+            quickcheck: ByteSize::kib(
+                a.value_of_lossy("quickcheck")
+                    .unwrap_or(Cow::from("0"))
+                    .parse::<usize>()
+                    .unwrap(),
+            ),
             output,
-            register: !a.is_present("R"),
-            cachefile: a.value_of_os("CACHEFILE").map(PathBuf::from),
-            detailed_statistics: a.is_present("S"),
-            sleep_us: a.value_of("SLEEP_US")
-                .unwrap_or("0")
-                .parse::<u32>()
-                .unwrap(),
+            register: !a.is_present("no-register"),
+            cachefile: a.value_of_os("cache").map(PathBuf::from),
+            detailed_statistics: a.is_present("stats"),
+            sleep_us: a.value_of("stutter").unwrap_or("0").parse::<u32>().unwrap(),
+            overrides,
         }
     }
 }
 
 fn parse_args() -> App {
-    let a = |short, long, help| Arg::with_name(short).short(short).long(long).help(help);
+    let a = |short, long, help| Arg::with_name(long).short(short).long(long).help(help);
     let cachefile_val = |s: String| -> result::Result<(), String> {
         if s.ends_with(".json") || s.ends_with("json.gz") {
             Ok(())
@@ -192,19 +218,18 @@ fn parse_args() -> App {
 
     clap::App::new(crate_name!())
         .version(crate_version!())
+        .author("© Flying Circus Internet Operations GmbH and contributors")
         .about(crate_description!())
-        .arg(Arg::with_name("DIRECTORY").help("Start scan in DIRECTORY"))
+        .arg(Arg::with_name("DIRECTORY").help("Starts scan in DIRECTORY"))
         .arg(
             a("l", "list", "Shows files containing Nix store references").display_order(1),
         )
         .arg(
-            Arg::with_name("CACHEFILE")
-                .short("c")
-                .long("cache")
-                .help("Keep results between runs in CACHEFILE (JSON)")
+            a("c", "cache", "Keeps results between runs in FILE (JSON)")
+                .value_name("FILE")
                 .long_help(
-                    "Caches scan results in CACHEFILE to avoid re-scanning unchanged files. \
-                     File extension must be one of `.json` or `.json.gz`.",
+                    "Caches scan results in FILE to avoid re-scanning unchanged files. \
+                     File extension must be one of `.json` or `.json.gz`",
                 )
                 .takes_value(true)
                 .validator(cachefile_val),
@@ -223,25 +248,26 @@ fn parse_args() -> App {
         ))
         .arg(
             a("C", "color", "Funky colorful output")
+                .value_name("WHEN")
                 .takes_value(true)
                 .possible_values(&["always", "never", "auto"])
                 .default_value("auto")
                 .long_help(
                     "Turns on funky colorful output. If set to \"auto\", color is on if \
-                     run in a terminal.",
+                     run in a terminal",
                 ),
         )
         .arg(a(
             "S",
-            "statistics",
+            "stats",
             "Prints detailed statistics like scans per file type.",
         ))
         .arg(
-            Arg::with_name("SLEEP_US")
-                .short("s")
-                .long("stutter")
-                .help(
-                    "Sleep so many microseconds after each file to limit I/O load.",
+            a("s", "stutter", "Sleeps SLEEP µs after each file access")
+                .value_name("SLEEP")
+                .long_help(
+                    "Sleeps SLEEP microseconds after each file to reduce I/O load. Files \
+                     loaded from the cache are not subject to stuttering",
                 )
                 .takes_value(true)
                 .validator(sleep_val),
@@ -253,15 +279,32 @@ fn parse_args() -> App {
             "Prints every file opened, implies --verbose",
         ))
         .arg(
-            a(
-                "q",
-                "quickcheck",
-                "Give up if no Nix store reference is found in the first <q> kbytes of a file",
-            ).takes_value(true)
+            a("q", "quickcheck", "Scans only the first SIZE kB of a file")
+                .takes_value(true)
+                .long_help(
+                    "Gives up if no Nix store references are found in the first SIZE kilobytes of \
+                     a file. Assumes that at least one Nix store reference is located near the \
+                     beginning. Speeds up scanning large files considerably",
+                )
+                .value_name("SIZE")
                 .default_value("512")
                 .validator(|s: String| -> result::Result<(), String> {
                     s.parse::<u32>().map(|_| ()).map_err(|e| e.to_string())
                 }),
+        )
+        .arg(
+            a("e", "exclude", "Skips files matching GLOB")
+                .value_name("GLOB")
+                .takes_value(true)
+                .multiple(true)
+                .number_of_values(1),
+        )
+        .arg(
+            a("i", "include", "Undoes excludes for files matching GLOB")
+                .value_name("GLOB")
+                .takes_value(true)
+                .multiple(true)
+                .number_of_values(1),
         )
         .get_matches()
         .into()
@@ -285,5 +328,25 @@ pub mod test {
     fn startdir_should_default_to_home() {
         let user = users::get_user_by_uid(users::get_effective_uid()).unwrap();
         assert_eq!(user.home_dir(), canonical_startdir("").unwrap());
+    }
+
+    #[test]
+    fn overrides_should_be_collected_and_prefixed() {
+        let m = clap::App::new("app")
+            .arg(
+                Arg::with_name("include")
+                    .short("i")
+                    .takes_value(true)
+                    .multiple(true),
+            )
+            .arg(
+                Arg::with_name("exclude")
+                    .short("e")
+                    .takes_value(true)
+                    .multiple(true),
+            )
+            .get_matches_from(vec!["app", "-i", "glob1", "-e", "glob2", "-i", "glob3"]);
+        let a = App::from(m);
+        assert_eq!(vec!["!glob2", "glob1", "glob3"], a.overrides);
     }
 }

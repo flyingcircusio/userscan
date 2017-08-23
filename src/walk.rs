@@ -125,18 +125,19 @@ mod tests {
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
     use super::*;
-    use tests::{app, assert_eq_vecs, FIXTURES};
+    use tests::{app, assert_eq_vecs, fake_gc};
 
     #[test]
     fn walk_fixture_dir1() {
-        let mut gcroots = registry::tests::FakeGCRoots::new(&*FIXTURES);
+        let mut gcroots = fake_gc();
         let stats = spawn_threads(&app("dir1"), &mut gcroots).unwrap();
         assert_eq_vecs(
             gcroots.registered,
             |s| s.to_owned(),
             &[
                 "dir1/duplicated|/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5",
-                "dir1/notignored|/nix/store/00n9gkswhqdgbhgs7lnz2ckqxphavjr8-ChasingBottoms-1.3.1.2.drv",
+                "dir1/notignored|/nix/store/00n9gkswhqdgbhgs7lnz2ckqxphavjr8-\
+                 ChasingBottoms-1.3.1.2.drv",
                 "dir1/notignored|/nix/store/00y6xgsdpjx3fyz4v7k5lwivi28yqd9f-initrd-fsinfo.drv",
                 "dir1/proto-http.la|/nix/store/9w3ci6fskmz3nw27fb68hybfa5v1r33f-libidn-1.33",
                 "dir1/proto-http.la|/nix/store/knvydciispmr4nr2rxg0iyyff3n1v4ax-gcc-6.2.0-lib",
@@ -170,14 +171,11 @@ mod tests {
         ).unwrap();
         set_permissions(&unreadable_d, Permissions::from_mode(0o111)).unwrap();
 
-        let borked_ignore = t.path().join(".ignore");
-        writeln!(File::create(&borked_ignore).unwrap(), "pattern[*").unwrap();
-
         let mut gcroots = registry::tests::FakeGCRoots::new(t.path());
         let stats = spawn_threads(&app(t.path()), &mut gcroots).unwrap();
         println!("registered GC roots: {:?}", gcroots.registered);
         assert_eq!(gcroots.registered.len(), 1);
-        assert_eq!(stats.softerrors, 3);
+        assert_eq!(stats.softerrors, 2);
 
         // otherwise it won't clean up
         set_permissions(&unreadable_d, Permissions::from_mode(0o755)).unwrap();
@@ -185,12 +183,16 @@ mod tests {
 
     #[test]
     fn should_not_cross_devices() {
-        let mut gcroots = registry::tests::FakeGCRoots::new(&*FIXTURES);
         let app = app("dir1");
-        let mut stats = app.statistics();
-        let mut pctx = ProcessingContext::create(&app, &mut stats, &mut gcroots).unwrap();
+        let mut pctx = ProcessingContext::create(&app, &mut app.statistics(), &mut fake_gc())
+            .unwrap();
         pctx.startdev = 0;
         let dent = app.walker().unwrap().build().next().unwrap().unwrap();
         assert_eq!(WalkState::Skip, pctx.process_direntry(dent).unwrap());
     }
+
+
+    // XXX - test .userscan-ignore in home dir #5
+    // let borked_ignore = t.path().join(".ignore");
+    // writeln!(File::create(&borked_ignore).unwrap(), "pattern[*").unwrap();
 }
