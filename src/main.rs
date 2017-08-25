@@ -8,6 +8,7 @@ extern crate nix;
 extern crate serde;
 extern crate serde_json;
 extern crate users;
+extern crate zip;
 #[macro_use]
 extern crate clap;
 #[macro_use]
@@ -66,6 +67,7 @@ pub struct App {
     startdir: PathBuf,
     excludefrom: Vec<PathBuf>,
     dotexclude: bool,
+    unzip: Vec<String>,
 }
 
 fn add_dotexclude<U: Users>(mut wb: WalkBuilder, u: &U) -> Result<WalkBuilder> {
@@ -111,8 +113,12 @@ impl App {
         }
     }
 
-    fn scanner(&self) -> scan::Scanner {
-        scan::Scanner::new(self.quickcheck.as_usize())
+    fn scanner(&self) -> Result<scan::Scanner> {
+        let mut ob = OverrideBuilder::new(&self.startdir);
+        for glob in &self.unzip {
+            ob.add(glob)?;
+        }
+        Ok(scan::Scanner::new(self.quickcheck.as_usize(), ob.build()?))
     }
 
     fn gcroots(&self) -> Result<Box<Register>> {
@@ -174,6 +180,7 @@ impl Default for App {
             overrides: vec![],
             excludefrom: vec![],
             dotexclude: true,
+            unzip: vec![],
         }
     }
 }
@@ -212,8 +219,9 @@ impl<'a> From<ArgMatches<'a>> for App {
             overrides,
             excludefrom: a.values_of_os("exclude-from")
                 .map(|vals| vals.map(PathBuf::from).collect())
-                .unwrap_or(vec![]),
+                .unwrap_or_default(),
             dotexclude: true,
+            unzip: a.values_of("unzip").map(|vals| vals.map(String::from).collect()).unwrap_or_default()
         }
     }
 }
@@ -319,7 +327,7 @@ fn parse_args() -> App {
                      beginning. Speeds up scanning large files considerably",
                 )
                 .value_name("SIZE")
-                .default_value("512")
+                .default_value("256")
                 .validator(|s: String| -> result::Result<(), String> {
                     s.parse::<u32>().map(|_| ()).map_err(|e| e.to_string())
                 }),
@@ -350,6 +358,15 @@ fn parse_args() -> App {
                 .takes_value(true)
                 .multiple(true)
                 .number_of_values(1),
+        )
+        .arg(
+            a("z", "unzip", "Scans inside ZIP archives for files matching GLOB.")
+                .long_help(
+                    "Unpacks all files with matching GLOB as ZIP archives and scans inside. \
+                     Accepts a comma-separated list of glob patterns [e.g., *.zip,*.egg]")
+                .value_name("GLOB,...")
+                .takes_value(true)
+                .use_delimiter(true)
         )
         .get_matches()
         .into()

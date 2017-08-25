@@ -9,6 +9,7 @@ error_chain! {
         Ignore(ignore::Error);
         Io(::std::io::Error);
         StripPrefix(::std::path::StripPrefixError);
+        Zip(::zip::result::ZipError);
     }
 
     errors {

@@ -29,7 +29,7 @@ impl ProcessingContext {
             startdev: app.start_meta()?.st_dev(),
             sleep: Duration::from_millis(app.sleep_us as u64 * 1000),
             cache: Arc::new(app.cache()?),
-            scanner: Arc::new(app.scanner()),
+            scanner: Arc::new(app.scanner()?),
             stats: stats.tx(),
             gc: gcroots.tx(),
         })
@@ -146,7 +146,6 @@ mod tests {
         for r in wb.build() {
             if let Ok(dent) = r {
                 let p = dent.path().strip_prefix(prefix).unwrap();
-                println!("walk2vec: {}", p.display());
                 paths.push(p.to_owned());
             }
         }
@@ -223,13 +222,18 @@ mod tests {
     fn walk_should_obey_exclude() {
         let mut app = app(".");
         app.overrides = vec!["!dir1".to_owned(), "!lftp*".to_owned()];
-        let paths = walk2vec(&app.walker().unwrap(), &*FIXTURES);
         assert_eq!(
-            vec!["", "cache.json", "dir2", "dir2/ignored", "dir2/link"]
-                .into_iter()
+            vec![
+                "",
+                "cache.json",
+                "dir2",
+                "dir2/ignored",
+                "dir2/link",
+                "miniegg-1-py3.5.egg",
+            ].into_iter()
                 .map(PathBuf::from)
                 .collect::<Vec<_>>(),
-            paths
+            walk2vec(&app.walker().unwrap(), &*FIXTURES)
         );
     }
 
@@ -254,11 +258,11 @@ mod tests {
             .and_then(|wb| ::add_dotexclude(wb, &users))
             .unwrap();
         assert_eq!(
-            walk2vec(&walker, p),
             vec!["", ".userscan-ignore", "file1"]
                 .into_iter()
                 .map(PathBuf::from)
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>(),
+            walk2vec(&walker, p)
         );
     }
 }
