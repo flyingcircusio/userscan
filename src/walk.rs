@@ -120,12 +120,39 @@ mod tests {
     extern crate tempdir;
 
     use registry;
+    use ignore::WalkBuilder;
     use self::tempdir::TempDir;
     use std::fs::{File, create_dir, set_permissions, Permissions};
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
     use super::*;
-    use tests::{app, assert_eq_vecs, fake_gc};
+    use tests::{app, assert_eq_vecs, fake_gc, FIXTURES};
+    use users::mock::{MockUsers, User};
+    use users::os::unix::UserExt;
+
+    // helper functions
+
+    fn wfile<P: AsRef<Path>>(path: P, contents: &str) {
+        let mut file = File::create(path).unwrap();
+        file.write_all(contents.as_bytes()).unwrap();
+    }
+
+    /// Walks whatever a given WalkBuilder builds and collects path relative to the fixtures dir.
+    ///
+    /// Hard errors lead to a panic, partial errors are silently ignored.
+    pub fn walk2vec(wb: &WalkBuilder, prefix: &Path) -> Vec<PathBuf> {
+        let mut paths = vec![];
+        for r in wb.build() {
+            if let Ok(dent) = r {
+                let p = dent.path().strip_prefix(prefix).unwrap();
+                println!("walk2vec: {}", p.display());
+                paths.push(p.to_owned());
+            }
+        }
+        paths.sort();
+        paths
+    }
 
     #[test]
     fn walk_fixture_dir1() {
@@ -150,29 +177,30 @@ mod tests {
     #[test]
     fn walk_softerrors() {
         let t = TempDir::new("test_walk").unwrap();
-        let readable = t.path().join("file1");
-        writeln!(
-            File::create(&readable).unwrap(),
-            "/nix/store/i4ai4idhj7d7qdyhv601568hna0b5car-a"
-        ).unwrap();
+        let p = t.path();
 
-        let unreadable_f = t.path().join("file2");
-        writeln!(
-            File::create(&unreadable_f).unwrap(),
-            "/nix/store/dxscwf37hgq0xafs54h0c8xx47vg6d5g-n"
-        ).unwrap();
+        wfile(
+            p.join("readable1"),
+            "/nix/store/i4ai4idhj7d7qdyhv601568hna0b5car-a",
+        );
+
+        let unreadable_f = p.join("unreadable2");
+        wfile(
+            &unreadable_f,
+            "/nix/store/dxscwf37hgq0xafs54h0c8xx47vg6d5g-n",
+        );
         set_permissions(&unreadable_f, Permissions::from_mode(0o000)).unwrap();
 
-        let unreadable_d = t.path().join("dir1");
+        let unreadable_d = p.join("unreadable-dir1");
         create_dir(&unreadable_d).unwrap();
-        writeln!(
-            File::create(&unreadable_d.join("file3")).unwrap(),
-            "/nix/store/5hg176hhc19mg8vm2rg3lv2j3vlj166b-m"
-        ).unwrap();
+        wfile(
+            &unreadable_d.join("file3"),
+            "/nix/store/5hg176hhc19mg8vm2rg3lv2j3vlj166b-m",
+        );
         set_permissions(&unreadable_d, Permissions::from_mode(0o111)).unwrap();
 
-        let mut gcroots = registry::tests::FakeGCRoots::new(t.path());
-        let stats = spawn_threads(&app(t.path()), &mut gcroots).unwrap();
+        let mut gcroots = registry::tests::FakeGCRoots::new(p);
+        let stats = spawn_threads(&app(p), &mut gcroots).unwrap();
         println!("registered GC roots: {:?}", gcroots.registered);
         assert_eq!(gcroots.registered.len(), 1);
         assert_eq!(stats.softerrors, 2);
@@ -191,8 +219,46 @@ mod tests {
         assert_eq!(WalkState::Skip, pctx.process_direntry(dent).unwrap());
     }
 
+    #[test]
+    fn walk_should_obey_exclude() {
+        let mut app = app(".");
+        app.overrides = vec!["!dir1".to_owned(), "!lftp*".to_owned()];
+        let paths = walk2vec(&app.walker().unwrap(), &*FIXTURES);
+        assert_eq!(
+            vec!["", "cache.json", "dir2", "dir2/ignored", "dir2/link"]
+                .into_iter()
+                .map(PathBuf::from)
+                .collect::<Vec<_>>(),
+            paths
+        );
+    }
 
-    // XXX - test .userscan-ignore in home dir #5
-    // let borked_ignore = t.path().join(".ignore");
-    // writeln!(File::create(&borked_ignore).unwrap(), "pattern[*").unwrap();
+    #[test]
+    fn walk_should_obey_excludefile() {
+        let t = TempDir::new("test_excludefile").unwrap();
+        let p = t.path();
+
+        let mut users = MockUsers::with_current_uid(100);
+        users.add_user(User::new(100, "johndoe", 100).with_home_dir(
+            &*p.to_string_lossy(),
+        ));
+        let mut app = app(p);
+        app.dotexclude = false;
+
+        wfile(p.join(".userscan-ignore"), "file2\n*.jpg\ndata*\n");
+        for f in vec!["file1", "file2", "pic.jpg", "data.json"] {
+            File::create(p.join(f)).unwrap();
+        }
+
+        let walker = app.walker()
+            .and_then(|wb| ::add_dotexclude(wb, &users))
+            .unwrap();
+        assert_eq!(
+            walk2vec(&walker, p),
+            vec!["", ".userscan-ignore", "file1"]
+                .into_iter()
+                .map(PathBuf::from)
+                .collect::<Vec<_>>()
+        );
+    }
 }

@@ -37,6 +37,7 @@ use bytesize::ByteSize;
 use clap::{Arg, ArgMatches};
 use errors::*;
 use ignore::overrides::OverrideBuilder;
+use ignore::WalkBuilder;
 use output::{Output, p2s};
 use registry::{GCRoots, NullGCRoots, Register};
 use statistics::Statistics;
@@ -44,54 +45,70 @@ use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::fs;
 use std::ops::DerefMut;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::result;
+use users::Users;
+use users::cache::UsersCache;
 use users::os::unix::UserExt;
 
 static GC_PREFIX: &str = "/nix/var/nix/gcroots/profiles/per-user";
-
-fn canonical_startdir<P: AsRef<Path>>(startdir: P) -> Result<PathBuf> {
-    let s = startdir.as_ref();
-    if s.as_os_str().is_empty() {
-        Ok(
-            users::get_user_by_uid(users::get_effective_uid())
-                .ok_or("cannot determine current user")?
-                .home_dir()
-                .to_path_buf(),
-        )
-    } else {
-        s.canonicalize()
-    }.chain_err(|| format!("start dir {} is not accessible", p2s(&startdir)))
-}
+static DOTEXCLUDE: &str = ".userscan-ignore";
 
 #[derive(Debug, Clone)]
 pub struct App {
-    startdir: PathBuf,
-    quickcheck: ByteSize,
-    register: bool,
-    output: Output,
     cachefile: Option<PathBuf>,
     detailed_statistics: bool,
-    sleep_us: u32,
+    output: Output,
     overrides: Vec<String>,
+    quickcheck: ByteSize,
+    register: bool,
+    sleep_us: u32,
+    startdir: PathBuf,
+    excludefrom: Vec<PathBuf>,
+    dotexclude: bool,
+}
+
+fn add_dotexclude<U: Users>(mut wb: WalkBuilder, u: &U) -> Result<WalkBuilder> {
+    if let Some(me) = u.get_user_by_uid(u.get_effective_uid()) {
+        let candidate = me.home_dir().join(DOTEXCLUDE);
+        if candidate.exists() {
+            if let Some(err) = wb.add_ignore(candidate) {
+                return Err(err.into());
+            }
+        }
+        Ok(wb)
+    } else {
+        Err(
+            format!("failed to locate UID {} in passwd", u.get_effective_uid()).into(),
+        )
+    }
 }
 
 impl App {
-    fn walker(&self) -> Result<ignore::WalkBuilder> {
+    fn walker(&self) -> Result<WalkBuilder> {
         let startdir = self.startdir()?;
         let mut ov = OverrideBuilder::new(&startdir);
         for o in self.overrides.iter() {
             let _ = ov.add(o)?;
         }
-        let mut wb = ignore::WalkBuilder::new(startdir);
+
+        let mut wb = WalkBuilder::new(startdir);
         wb.parents(false)
-            .git_exclude(false)
             .git_global(false)
             .git_ignore(false)
             .ignore(false)
             .overrides(ov.build()?)
             .hidden(false);
-        Ok(wb)
+        for p in self.excludefrom.iter() {
+            if let Some(err) = wb.add_ignore(p) {
+                return Err(err).chain_err(|| format!("failed to load exclude file"));
+            }
+        }
+        if self.dotexclude {
+            add_dotexclude(wb, &UsersCache::new())
+        } else {
+            Ok(wb)
+        }
     }
 
     fn scanner(&self) -> scan::Scanner {
@@ -120,7 +137,9 @@ impl App {
     }
 
     fn startdir(&self) -> Result<PathBuf> {
-        canonical_startdir(&self.startdir)
+        self.startdir.canonicalize().chain_err(|| {
+            format!("start dir {} is not accessible", p2s(&self.startdir))
+        })
     }
 
     /// The Metadata entry of the start directory.
@@ -130,6 +149,7 @@ impl App {
         fs::metadata(self.startdir()?).map_err(|e| e.into())
     }
 
+    /// Main entry point
     pub fn run(&self) -> Result<i32> {
         self.output.log_init();
         info!("{}: Scouting {} ...", crate_name!(), p2s(&self.startdir));
@@ -152,6 +172,8 @@ impl Default for App {
             detailed_statistics: false,
             sleep_us: 0,
             overrides: vec![],
+            excludefrom: vec![],
+            dotexclude: true,
         }
     }
 }
@@ -188,6 +210,10 @@ impl<'a> From<ArgMatches<'a>> for App {
             detailed_statistics: a.is_present("stats"),
             sleep_us: a.value_of("stutter").unwrap_or("0").parse::<u32>().unwrap(),
             overrides,
+            excludefrom: a.values_of_os("exclude-from")
+                .map(|vals| vals.map(PathBuf::from).collect())
+                .unwrap_or(vec![]),
+            dotexclude: true,
         }
     }
 }
@@ -220,7 +246,11 @@ fn parse_args() -> App {
         .version(crate_version!())
         .author("© Flying Circus Internet Operations GmbH and contributors")
         .about(crate_description!())
-        .arg(Arg::with_name("DIRECTORY").help("Starts scan in DIRECTORY"))
+        .arg(
+            Arg::with_name("DIRECTORY")
+                .help("Starts scan in DIRECTORY")
+                .default_value("."),
+        )
         .arg(
             a("l", "list", "Shows files containing Nix store references").display_order(1),
         )
@@ -273,11 +303,13 @@ fn parse_args() -> App {
                 .validator(sleep_val),
         )
         .arg(a("v", "verbose", "Additional output"))
-        .arg(a(
-            "d",
-            "debug",
-            "Prints every file opened, implies --verbose",
-        ))
+        .arg(
+            a(
+                "d",
+                "debug",
+                "Shows every file opened and lots of other stuff. Implies --verbose",
+            ).display_order(1000),
+        )
         .arg(
             a("q", "quickcheck", "Scans only the first SIZE kB of a file")
                 .takes_value(true)
@@ -300,8 +332,21 @@ fn parse_args() -> App {
                 .number_of_values(1),
         )
         .arg(
-            a("i", "include", "Undoes excludes for files matching GLOB")
+            a("i", "include", "Scans only files matching GLOB")
                 .value_name("GLOB")
+                .takes_value(true)
+                .multiple(true)
+                .number_of_values(1),
+        )
+        .arg(
+            a("E", "exclude-from", "Loads exclude globs from FILE")
+                .long_help(&format!(
+                    "Loads exclude globs from FILE, which is expected to be in .gitignore \
+                     format. Exclude globs are always read from ~/{} if it exists. \
+                     May be given multiple times",
+                    DOTEXCLUDE
+                ))
+                .value_name("FILE")
                 .takes_value(true)
                 .multiple(true)
                 .number_of_values(1),
@@ -323,12 +368,6 @@ fn main() {
 #[cfg(test)]
 pub mod test {
     use super::*;
-
-    #[test]
-    fn startdir_should_default_to_home() {
-        let user = users::get_user_by_uid(users::get_effective_uid()).unwrap();
-        assert_eq!(user.home_dir(), canonical_startdir("").unwrap());
-    }
 
     #[test]
     fn overrides_should_be_collected_and_prefixed() {
