@@ -1,0 +1,14 @@
+2017-08-25  Christian Kauhaus <kc@flyingcircus.io>
+
+	* Release 0.1.4
+
+	* Limit I/O load by sleeping a small amount between file accesses
+	(stuttering) (#10).
+
+	* Unpack compressed ZIP archives on the fly (#2).
+
+	* Never cross device boundaries (#3).
+
+	* Select/ignore file patterns via --include/--exclude command line
+	options, --exclude-from=IGNOREFILE or automagically by placing
+	patterns into ~/.userscan-ignore (#5).
