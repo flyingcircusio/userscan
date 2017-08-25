@@ -1,6 +1,7 @@
 # fc-userscan
 
-Scans and registers GC roots for manually compiled programs on NixOS.
+Scans directories containing manually compiled programs and registers them with
+the Nix garbage collector.
 
 ## Problem description
 
@@ -32,10 +33,10 @@ Now let's see if there are Nix store references present (hint: there are):
 
 ```ShellSession
 $ fc-userscan -l myvenv
-myvenv/bin/python3.5:
+myvenv/bin/python3.5
 /nix/store/a5zbx856hyfgz2isz0j60i8w44i6av09-python3-3.5.2
 
-myvenv/pyvenv.cfg:
+myvenv/pyvenv.cfg
 /nix/store/a5zbx856hyfgz2isz0j60i8w44i6av09-python3-3.5.2
 ```
 
@@ -46,11 +47,11 @@ the Nix garbage collector:
 
 ```ShellSession
 $ ls -lR /nix/var/nix/gcroots/profiles/per-user/ckauhaus/home/ckauhaus/myvenv
-/nix/var/nix/gcroots/profiles/per-user/ckauhaus/home/ckauhaus/myvenv:
+/nix/var/nix/gcroots/profiles/per-user/ckauhaus/home/ckauhaus/myvenv
 lrwxrwxrwx 1 ckauhaus users 57 Aug 11 13:29 a5zbx856hyfgz2isz0j60i8w44i6av09 -> /nix/store/a5zbx856hyfgz2isz0j60i8w44i6av09-python3-3.5.2
 drwxr-xr-x 2 ckauhaus users 46 Aug 11 13:29 bin
 
-/nix/var/nix/gcroots/profiles/per-user/ckauhaus/home/ckauhaus/myvenv/bin:
+/nix/var/nix/gcroots/profiles/per-user/ckauhaus/home/ckauhaus/myvenv/bin
 lrwxrwxrwx 1 ckauhaus users 57 Aug 11 13:29 a5zbx856hyfgz2isz0j60i8w44i6av09 -> /nix/store/a5zbx856hyfgz2isz0j60i8w44i6av09-python3-3.5.2
 ```
 

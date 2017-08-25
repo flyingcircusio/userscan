@@ -3,8 +3,7 @@ name = "fc-userscan"
 version = "0.1.4"
 authors = ["Christian Kauhaus <kc@flyingcircus.io>"]
 description = """\
-Searches arbitrary directories for Nix store references and registers them \
-with the Nix garbage collector.
+Scans files for Nix store references and registers them with the Nix garbage collector.
 """
 repository = "https://github.com/flyingcircusio/userscan"
 readme = "README.md"
