@@ -1,5 +1,5 @@
 use atty::{self, Stream};
-use cache::StorePaths;
+use storepaths::StorePaths;
 use colored::{self, Colorize, ColoredString};
 use env_logger::LogBuilder;
 use errors::*;

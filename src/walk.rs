@@ -1,9 +1,8 @@
 extern crate crossbeam;
 
-use cache::{Cache, Lookup};
 use errors::*;
 use ignore::{self, DirEntry, WalkState, WalkParallel};
-use output::fmt_error_chain;
+use output::{fmt_error_chain, p2s};
 use registry::{Register, GCRootsTx};
 use scan::Scanner;
 use statistics::{Statistics, StatsMsg, StatsTx};
@@ -11,6 +10,7 @@ use std::os::linux::fs::MetadataExt;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use storepaths::{Cache, Lookup};
 use super::App;
 
 #[derive(Clone)]
@@ -101,6 +101,7 @@ pub fn spawn_threads(app: &App, gcroots: &mut Register) -> Result<Statistics> {
     let mut cache = crossbeam::scope(|threads| -> Result<Arc<Cache>> {
         let pctx = ProcessingContext::create(app, &mut stats, gcroots)?;
         let walker = app.walker()?.build_parallel();
+        info!("{}: Scouting {} ...", crate_name!(), p2s(&app.startdir));
         let walk_hdl = threads.spawn(move || pctx.walk(walker));
         threads.spawn(|| stats.receive_loop());
         gcroots.register_loop()?;
@@ -221,11 +222,14 @@ mod tests {
     #[test]
     fn walk_should_obey_exclude() {
         let mut app = app(".");
-        app.overrides = vec!["!dir1".to_owned(), "!lftp*".to_owned()];
+        app.overrides = vec![
+            "!dir1".to_owned(),
+            "!lftp*".to_owned(),
+            "!cache*".to_owned(),
+        ];
         assert_eq!(
             vec![
                 "",
-                "cache.json",
                 "dir2",
                 "dir2/ignored",
                 "dir2/link",

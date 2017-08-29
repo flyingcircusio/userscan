@@ -1,6 +1,6 @@
 [package]
 name = "fc-userscan"
-version = "0.1.4"
+version = "0.1.5-dev"
 authors = ["Christian Kauhaus <kc@flyingcircus.io>"]
 description = """\
 Scans files for Nix store references and registers them with the Nix garbage collector.
@@ -17,7 +17,6 @@ clap = "2"
 colored = "1"
 crossbeam = "0.2"
 env_logger = "0.4"
-flate2 = "0.2"
 fnv = "1"
 ignore = "0.2"
 lazy_static = "0.2"
@@ -25,9 +24,9 @@ log = "0.3"
 memmap = "0.5"
 nix = "0.9"
 regex = "0.2"
+rmp-serde = "0.13"
 serde = "1"
 serde_derive = "1"
-serde_json = "1"
 twoway = "0.1"
 users = "0.5"
 zip = "0.2"

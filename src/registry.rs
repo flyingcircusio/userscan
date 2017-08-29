@@ -1,4 +1,3 @@
-use cache::StorePaths;
 use colored::Colorize;
 use errors::*;
 use ignore::{self, WalkBuilder, DirEntry};
@@ -13,6 +12,7 @@ use std::os::unix::prelude::*;
 use std::path::{Path, PathBuf};
 use std::result;
 use std::sync::mpsc;
+use storepaths::StorePaths;
 use users::get_effective_username;
 
 pub type GCRootsTx = mpsc::Sender<StorePaths>;

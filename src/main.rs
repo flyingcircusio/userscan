@@ -2,11 +2,11 @@ extern crate atty;
 extern crate bytesize;
 extern crate colored;
 extern crate env_logger;
-extern crate flate2;
+extern crate fnv;
 extern crate ignore;
 extern crate nix;
+extern crate rmp_serde;
 extern crate serde;
-extern crate serde_json;
 extern crate users;
 extern crate zip;
 #[macro_use]
@@ -23,17 +23,17 @@ extern crate serde_derive;
 #[cfg(test)]
 extern crate tempdir;
 
-mod cache;
 mod errors;
 mod output;
 mod registry;
 mod scan;
 mod statistics;
+mod storepaths;
 mod walk;
 #[cfg(test)]
 mod tests;
 
-use cache::Cache;
+use storepaths::Cache;
 use bytesize::ByteSize;
 use clap::{Arg, ArgMatches};
 use errors::*;
@@ -54,6 +54,13 @@ use users::os::unix::UserExt;
 
 static GC_PREFIX: &str = "/nix/var/nix/gcroots/profiles/per-user";
 static DOTEXCLUDE: &str = ".userscan-ignore";
+
+lazy_static! {
+    static ref AFTER_HELP: String = format!(
+        "Ignore globs are always loaded from ~/{} if it exists. For the format of all ignore \
+         files refer to the gitignore(5) man page.",
+        DOTEXCLUDE);
+}
 
 #[derive(Debug, Clone)]
 pub struct App {
@@ -158,7 +165,6 @@ impl App {
     /// Main entry point
     pub fn run(&self) -> Result<i32> {
         self.output.log_init();
-        info!("{}: Scouting {} ...", crate_name!(), p2s(&self.startdir));
         match walk::spawn_threads(self, self.gcroots()?.deref_mut())?
             .softerrors() {
             0 => Ok(0),
@@ -221,24 +227,15 @@ impl<'a> From<ArgMatches<'a>> for App {
                 .map(|vals| vals.map(PathBuf::from).collect())
                 .unwrap_or_default(),
             dotexclude: true,
-            unzip: a.values_of("unzip").map(|vals| vals.map(String::from).collect()).unwrap_or_default()
+            unzip: a.values_of("unzip")
+                .map(|vals| vals.map(String::from).collect())
+                .unwrap_or_default(),
         }
     }
 }
 
-fn parse_args() -> App {
+fn args<'a, 'b>() -> clap::App<'a, 'b> {
     let a = |short, long, help| Arg::with_name(long).short(short).long(long).help(help);
-    let cachefile_val = |s: String| -> result::Result<(), String> {
-        if s.ends_with(".json") || s.ends_with("json.gz") {
-            Ok(())
-        } else {
-            Err(format!(
-                "extension must be either {} or {}",
-                p2s(".json"),
-                p2s(".json.gz")
-            ))
-        }
-    };
     let sleep_val = |s: String| -> result::Result<(), String> {
         let val = s.parse::<u64>().map_err(|e| e.to_string())?;
         if val < 1_000_000 {
@@ -263,14 +260,16 @@ fn parse_args() -> App {
             a("l", "list", "Shows files containing Nix store references").display_order(1),
         )
         .arg(
-            a("c", "cache", "Keeps results between runs in FILE (JSON)")
-                .value_name("FILE")
+            a(
+                "c",
+                "cache",
+                "Keeps results between runs in FILE (messagepack)",
+            ).value_name("FILE")
                 .long_help(
                     "Caches scan results in FILE to avoid re-scanning unchanged files. \
-                     File extension must be one of `.json` or `.json.gz`",
+                     The cache is kept as messagepack file",
                 )
-                .takes_value(true)
-                .validator(cachefile_val),
+                .takes_value(true),
         )
         .arg(
             a(
@@ -348,32 +347,34 @@ fn parse_args() -> App {
         )
         .arg(
             a("E", "exclude-from", "Loads exclude globs from FILE")
-                .long_help(&format!(
-                    "Loads exclude globs from FILE, which is expected to be in .gitignore \
-                     format. Exclude globs are always read from ~/{} if it exists. \
+                .long_help(
+                    "Loads exclude globs from FILE, which is expected to be in .gitignore format. \
                      May be given multiple times",
-                    DOTEXCLUDE
-                ))
+                )
                 .value_name("FILE")
                 .takes_value(true)
                 .multiple(true)
                 .number_of_values(1),
         )
         .arg(
-            a("z", "unzip", "Scans inside ZIP archives for files matching GLOB.")
-                .long_help(
-                    "Unpacks all files with matching GLOB as ZIP archives and scans inside. \
-                     Accepts a comma-separated list of glob patterns [e.g., *.zip,*.egg]")
+            a(
+                "z",
+                "unzip",
+                "Scans inside ZIP archives for files matching GLOB.",
+            ).long_help(
+                "Unpacks all files with matching GLOB as ZIP archives and scans inside. \
+                     Accepts a comma-separated list of glob patterns [e.g., *.zip,*.egg]",
+            )
                 .value_name("GLOB,...")
                 .takes_value(true)
-                .use_delimiter(true)
+                .use_delimiter(true),
         )
-        .get_matches()
-        .into()
+        .after_help(AFTER_HELP.as_str())
 }
 
 fn main() {
-    match parse_args().run() {
+    let app = App::from(args().get_matches());
+    match app.run() {
         Err(ref err) => {
             error!("{}", output::fmt_error_chain(err));
             std::process::exit(2)
@@ -382,27 +383,22 @@ fn main() {
     }
 }
 
+
 #[cfg(test)]
 pub mod test {
     use super::*;
 
     #[test]
     fn overrides_should_be_collected_and_prefixed() {
-        let m = clap::App::new("app")
-            .arg(
-                Arg::with_name("include")
-                    .short("i")
-                    .takes_value(true)
-                    .multiple(true),
-            )
-            .arg(
-                Arg::with_name("exclude")
-                    .short("e")
-                    .takes_value(true)
-                    .multiple(true),
-            )
-            .get_matches_from(vec!["app", "-i", "glob1", "-e", "glob2", "-i", "glob3"]);
-        let a = App::from(m);
+        let a = App::from(args().get_matches_from(vec![
+            "app",
+            "-i",
+            "glob1",
+            "-e",
+            "glob2",
+            "-i",
+            "glob3",
+        ]));
         assert_eq!(vec!["!glob2", "glob1", "glob3"], a.overrides);
     }
 }

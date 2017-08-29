@@ -2,10 +2,10 @@ extern crate memmap;
 extern crate regex;
 extern crate twoway;
 
-use cache::StorePaths;
 use errors::*;
 use ignore::{DirEntry, Match};
 use ignore::overrides::Override;
+use output::p2s;
 use self::memmap::{Mmap, Protection};
 use self::regex::bytes::Regex;
 use std::error::Error;
@@ -14,6 +14,7 @@ use std::fs;
 use std::io::Read;
 use std::os::unix::prelude::*;
 use std::path::PathBuf;
+use storepaths::StorePaths;
 use zip::read::ZipArchive;
 use zip::result::ZipError;
 
@@ -167,15 +168,13 @@ impl Scanner {
     fn scan(&self, dent: &DirEntry) -> Result<ScanResult> {
         match dent.error() {
             Some(e) if !e.is_partial() => {
-                return Err(
-                    format!("{}: {}", dent.path().display(), e.description()).into(),
-                )
+                return Err(format!("{}: {}", p2s(dent.path()), e.description()).into())
             }
             _ => (),
         }
         if let Some(ft) = dent.file_type() {
             if let Some(res) = self.scan_inode(dent, ft) {
-                return res.chain_err(|| format!("{}", dent.path().display()));
+                return res.chain_err(|| format!("{}", p2s(dent.path())));
             }
         }
         // silent fall-through: no idea how to handle this DirEntry
@@ -190,6 +189,7 @@ impl Scanner {
         })
     }
 }
+
 
 #[cfg(test)]
 mod tests {

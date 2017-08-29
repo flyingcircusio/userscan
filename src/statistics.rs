@@ -1,14 +1,14 @@
 use atty::{self, Stream};
 use ByteSize;
-use cache::StorePaths;
 use colored::Colorize;
 use output::d2s;
 use std::collections::HashMap;
-use std::hash::Hash;
-use std::time;
 use std::ffi::OsString;
+use std::hash::Hash;
 use std::ops::{Add, AddAssign};
 use std::sync::mpsc;
+use std::time;
+use storepaths::StorePaths;
 
 pub type StatsTx = mpsc::Sender<StatsMsg>;
 
