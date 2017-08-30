@@ -1,3 +1,13 @@
+2017-08-30  kc@flyingcircus.io
+
+	* Release 0.2.0
+
+	* The cache is not stored as compressed messagepack file (#11).
+
+	* Decompress zipped files like Python eggs on the fly (#2).
+
+	* Clarify help message.
+
 2017-08-25  Christian Kauhaus <kc@flyingcircus.io>
 
 	* Release 0.1.4

@@ -56,13 +56,6 @@ static STORE: &str = "/nix/store/";
 static GC_PREFIX: &str = "/nix/var/nix/gcroots/profiles/per-user";
 static DOTEXCLUDE: &str = ".userscan-ignore";
 
-lazy_static! {
-    static ref AFTER_HELP: String = format!(
-        "Ignore globs are always loaded from ~/{} if it exists. For the format of all ignore \
-         files refer to the gitignore(5) man page.",
-        DOTEXCLUDE);
-}
-
 #[derive(Debug, Clone)]
 pub struct App {
     cachefile: Option<PathBuf>,
@@ -71,7 +64,7 @@ pub struct App {
     overrides: Vec<String>,
     quickcheck: ByteSize,
     register: bool,
-    sleep_us: u32,
+    sleep_ms: Option<f32>,
     startdir: PathBuf,
     excludefrom: Vec<PathBuf>,
     dotexclude: bool,
@@ -95,6 +88,7 @@ fn add_dotexclude<U: Users>(mut wb: WalkBuilder, u: &U) -> Result<WalkBuilder> {
 }
 
 impl App {
+    /// WalkBuilder configured according to the cmdline arguments
     fn walker(&self) -> Result<WalkBuilder> {
         let startdir = self.startdir()?;
         let mut ov = OverrideBuilder::new(&startdir);
@@ -183,7 +177,7 @@ impl Default for App {
             output: Output::default(),
             cachefile: None,
             detailed_statistics: false,
-            sleep_us: 0,
+            sleep_ms: None,
             overrides: vec![],
             excludefrom: vec![],
             dotexclude: true,
@@ -222,7 +216,7 @@ impl<'a> From<ArgMatches<'a>> for App {
             register: !a.is_present("no-register"),
             cachefile: a.value_of_os("cache").map(PathBuf::from),
             detailed_statistics: a.is_present("stats"),
-            sleep_us: a.value_of("stutter").unwrap_or("0").parse::<u32>().unwrap(),
+            sleep_ms: a.value_of("stutter").map(|val| val.parse::<f32>().unwrap()),
             overrides,
             excludefrom: a.values_of_os("exclude-from")
                 .map(|vals| vals.map(PathBuf::from).collect())
@@ -235,11 +229,19 @@ impl<'a> From<ArgMatches<'a>> for App {
     }
 }
 
+lazy_static! {
+    static ref USAGE: String = format!("{} [OPTIONS] <DIRECTORY>", crate_name!());
+    static ref AFTER_HELP: String = format!(
+        "Ignore globs are always loaded from ~/{} if it exists. For the format of all ignore \
+         files refer to the gitignore(5) man page.",
+        DOTEXCLUDE);
+}
+
 fn args<'a, 'b>() -> clap::App<'a, 'b> {
     let a = |short, long, help| Arg::with_name(long).short(short).long(long).help(help);
-    let sleep_val = |s: String| -> result::Result<(), String> {
-        let val = s.parse::<u64>().map_err(|e| e.to_string())?;
-        if val < 1_000_000 {
+    let validate_stutter = |s: String| -> result::Result<(), String> {
+        let val = s.parse::<f32>().map_err(|e| e.to_string())?;
+        if val < 1e3 {
             Ok(())
         } else {
             Err(
@@ -252,25 +254,17 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
         .version(crate_version!())
         .author("© Flying Circus Internet Operations GmbH and contributors")
         .about(crate_description!())
+        .usage(USAGE.as_str())
+        .after_help(AFTER_HELP.as_str())
         .arg(
-            Arg::with_name("DIRECTORY")
-                .help("Starts scan in DIRECTORY")
-                .default_value("."),
+            Arg::with_name("DIRECTORY").help("Starts scan in DIRECTORY").required(true)
         )
         .arg(
-            a("l", "list", "Shows files containing Nix store references").display_order(1),
-        )
-        .arg(
-            a(
-                "c",
-                "cache",
-                "Keeps results between runs in FILE (messagepack)",
-            ).value_name("FILE")
-                .long_help(
-                    "Caches scan results in FILE to avoid re-scanning unchanged files. \
-                     The cache is kept as messagepack file",
-                )
-                .takes_value(true),
+            a("l", "list", "Prints Nix store references while scanning")
+            .long_help(
+                "Prints Nix store references while scanning. GC roots are registered by default, \
+                 except when the -R/--no-register option is given"
+            ).display_order(1),
         )
         .arg(
             a(
@@ -278,6 +272,18 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
                 "no-register",
                 "Don't register found references, implies --list",
             ).display_order(2),
+        )
+        .arg(
+            a(
+                "c",
+                "cache",
+                "Keeps results between runs in FILE",
+            ).value_name("FILE")
+                .long_help(
+                    "Caches scan results in FILE to avoid re-scanning unchanged files. \
+                     The cache is kept as a compressed messagepack file",
+                )
+                .takes_value(true),
         )
         .arg(a(
             "1",
@@ -298,17 +304,17 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
         .arg(a(
             "S",
             "stats",
-            "Prints detailed statistics like scans per file type.",
+            "Prints detailed statistics like scans per file type",
         ))
         .arg(
-            a("s", "stutter", "Sleeps SLEEP µs after each file access")
+            a("s", "stutter", "Sleeps SLEEP ms after each file access")
                 .value_name("SLEEP")
                 .long_help(
-                    "Sleeps SLEEP microseconds after each file to reduce I/O load. Files \
+                    "Sleeps SLEEP milliseconds after each file to reduce I/O load. Files \
                      loaded from the cache are not subject to stuttering",
                 )
                 .takes_value(true)
-                .validator(sleep_val),
+                .validator(validate_stutter),
         )
         .arg(a("v", "verbose", "Additional output"))
         .arg(
@@ -370,7 +376,6 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
                 .takes_value(true)
                 .use_delimiter(true),
         )
-        .after_help(AFTER_HELP.as_str())
 }
 
 fn main() {
@@ -399,6 +404,7 @@ pub mod test {
             "glob2",
             "-i",
             "glob3",
+            "dir",
         ]));
         assert_eq!(vec!["!glob2", "glob1", "glob3"], a.overrides);
     }

@@ -13,10 +13,10 @@ use std::time::Duration;
 use storepaths::{Cache, Lookup};
 use super::App;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct ProcessingContext {
     startdev: u64,
-    sleep: Duration,
+    sleep: Option<Duration>,
     cache: Arc<Cache>,
     scanner: Arc<Scanner>,
     stats: StatsTx,
@@ -27,7 +27,7 @@ impl ProcessingContext {
     fn create(app: &App, stats: &mut Statistics, gcroots: &mut Register) -> Result<Self> {
         Ok(Self {
             startdev: app.start_meta()?.st_dev(),
-            sleep: Duration::from_millis(app.sleep_us as u64 * 1000),
+            sleep: app.sleep_ms.map(|val| Duration::new(0, (val * 1e6) as u32)),
             cache: Arc::new(app.cache()?),
             scanner: Arc::new(app.scanner()?),
             stats: stats.tx(),
@@ -44,7 +44,9 @@ impl ProcessingContext {
             Lookup::Dir(sp) => sp,
             Lookup::Hit(sp) => sp,
             Lookup::Miss(d) => {
-                thread::sleep(self.sleep);
+                if let Some(dur) = self.sleep {
+                    thread::sleep(dur);
+                }
                 self.scanner.find_paths(d)?
             }
         };
@@ -102,6 +104,9 @@ pub fn spawn_threads(app: &App, gcroots: &mut Register) -> Result<Statistics> {
         let pctx = ProcessingContext::create(app, &mut stats, gcroots)?;
         let walker = app.walker()?.build_parallel();
         info!("{}: Scouting {} ...", crate_name!(), p2s(&app.startdir));
+        if let Some(dur) = pctx.sleep {
+            debug!("stutter {:?}", dur);
+        }
         let walk_hdl = threads.spawn(move || pctx.walk(walker));
         threads.spawn(|| stats.receive_loop());
         gcroots.register_loop()?;
