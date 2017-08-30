@@ -162,13 +162,12 @@ mod tests {
             gcroots.registered,
             |s| s.to_owned(),
             &[
-                "dir1/duplicated|/nix/store/010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5",
-                "dir1/notignored|/nix/store/00n9gkswhqdgbhgs7lnz2ckqxphavjr8-\
-                 ChasingBottoms-1.3.1.2.drv",
-                "dir1/notignored|/nix/store/00y6xgsdpjx3fyz4v7k5lwivi28yqd9f-initrd-fsinfo.drv",
-                "dir1/proto-http.la|/nix/store/9w3ci6fskmz3nw27fb68hybfa5v1r33f-libidn-1.33",
-                "dir1/proto-http.la|/nix/store/knvydciispmr4nr2rxg0iyyff3n1v4ax-gcc-6.2.0-lib",
-                "dir1/six.py|/nix/store/1b4i3gm31j1ipfbx1v9a3hhgmp2wvyyw-python2.7-six-1.9.0",
+                "dir1/duplicated|010yd8jls8w4vcnql4zhjbnyp2yay5pl-bash-4.4-p5",
+                "dir1/notignored|00n9gkswhqdgbhgs7lnz2ckqxphavjr8-ChasingBottoms-1.3.1.2.drv",
+                "dir1/notignored|00y6xgsdpjx3fyz4v7k5lwivi28yqd9f-initrd-fsinfo.drv",
+                "dir1/proto-http.la|9w3ci6fskmz3nw27fb68hybfa5v1r33f-libidn-1.33",
+                "dir1/proto-http.la|knvydciispmr4nr2rxg0iyyff3n1v4ax-gcc-6.2.0-lib",
+                "dir1/six.py|1b4i3gm31j1ipfbx1v9a3hhgmp2wvyyw-python2.7-six-1.9.0",
             ],
         );
         assert_eq!(stats.softerrors, 0);

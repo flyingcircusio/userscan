@@ -13,17 +13,14 @@ use std::path::{Path, PathBuf};
 use std::result;
 use std::sync::mpsc;
 use storepaths::StorePaths;
+use super::STORE;
 use users::get_effective_username;
 
 pub type GCRootsTx = mpsc::Sender<StorePaths>;
 pub type GCRootsRx = mpsc::Receiver<StorePaths>;
 
 fn extract_hash<'a>(path: &'a Path) -> &'a [u8] {
-    &path.strip_prefix("/nix/store/")
-        .unwrap_or(path)
-        .as_os_str()
-        .as_bytes()
-        [..32]
+    &path.as_os_str().as_bytes()[..32]
 }
 
 #[derive(Debug, Default)]
@@ -36,6 +33,7 @@ pub struct GCRoots {
     rx: Option<GCRootsRx>,
 }
 
+/// IPC endpoint for garbage collection roots registry
 pub trait Register {
     fn register_loop(&mut self) -> Result<()>;
 
@@ -61,6 +59,7 @@ impl GCRoots {
         })
     }
 
+    /// Determines exactly where a GC link should live.
     fn gc_link_dir<P: AsRef<Path>>(&self, scanned: P) -> PathBuf {
         let dir = scanned.as_ref().parent().unwrap_or(Path::new("."));
         self.prefix.join(
@@ -80,9 +79,14 @@ impl GCRoots {
         Ok(1)
     }
 
+    /// Creates or updates a single GC link.
+    ///
+    /// `target` is assumed to be without leading `/nix/store/` prefix.
     fn link<P: AsRef<Path>, T: AsRef<Path>>(&mut self, dir: P, target: T) -> Result<usize> {
-        let target = target.as_ref();
-        let linkname = dir.as_ref().join(&OsStr::from_bytes(extract_hash(target)));
+        let linkname = dir.as_ref().join(&OsStr::from_bytes(
+            extract_hash(target.as_ref()),
+        ));
+        let target = Path::new(STORE).join(target);
         if self.seen.contains(&linkname) {
             return Ok(0);
         }
@@ -95,12 +99,12 @@ impl GCRoots {
                     fs::remove_file(&linkname).chain_err(|| {
                         format!("cannot remove {}", linkname.display())
                     })?;
-                    self.create_link(dir.as_ref(), linkname, target)
+                    self.create_link(dir.as_ref(), linkname, &target)
                 }
             }
             Err(e) => {
                 match e.kind() {
-                    io::ErrorKind::NotFound => self.create_link(dir.as_ref(), linkname, target),
+                    io::ErrorKind::NotFound => self.create_link(dir.as_ref(), linkname, &target),
                     _ => {
                         Err(e).chain_err(|| {
                             format!("failed to evaluate existing link {}", linkname.display())
@@ -111,6 +115,7 @@ impl GCRoots {
         }
     }
 
+    /// Registers all Nix store paths with the garbage collector.
     fn register(&mut self, sp: &StorePaths) -> Result<usize> {
         self.output.print_store_paths(&sp)?;
         let dir = self.gc_link_dir(sp.path());
@@ -225,7 +230,9 @@ impl Register for NullGCRoots {
 
 #[cfg(test)]
 pub mod tests {
-    use tempdir::TempDir;
+    extern crate tempdir;
+
+    use self::tempdir::TempDir;
     use super::*;
 
     fn _gcroots() -> (TempDir, GCRoots) {
@@ -256,26 +263,24 @@ pub mod tests {
     }
 
     #[test]
-    fn create_link() {
+    fn should_create_link() {
         let (td, mut gc) = _gcroots();
-        let storepath = Path::new("/nix/store/gmy86w4020xzjw9s8qzzz0bgx8ldkhhk-e");
+        let storepath = Path::new("gmy86w4020xzjw9s8qzzz0bgx8ldkhhk-e34kjk");
         let expected = td.path().join("gmy86w4020xzjw9s8qzzz0bgx8ldkhhk");
-        assert_eq!(gc.link(td.path(), storepath).unwrap(), 1);
+        assert_eq!(gc.link(td.path(), storepath).expect("link 1 failed"), 1);
         assert!(is_symlink(&expected));
         assert!(gc.seen.contains(&expected));
         // second attempt: do nothing
-        assert_eq!(gc.link(td.path(), storepath).unwrap(), 0);
+        assert_eq!(gc.link(td.path(), storepath).expect("link 2 failed"), 0);
     }
 
     #[test]
-    fn create_link_creates_dir() {
+    fn create_link_should_create_dir() {
         let (td, mut gc) = _gcroots();
         assert!(fs::metadata(td.path().join("d1")).is_err());
         assert_eq!(
-            gc.link(
-                td.path().join("d1"),
-                "/nix/store/gmy86w4020xzjw9s8qzzz0bgx8ldkhhk-e",
-            ).unwrap(),
+            gc.link(td.path().join("d1"), "gmy86w4020xzjw9s8qzzz0bgx8ldkhhk-e")
+                .unwrap(),
             1
         );
         assert!(
@@ -286,14 +291,14 @@ pub mod tests {
     }
 
     #[test]
-    fn create_link_corrects_existing_link() {
+    fn create_link_should_correct_existing_link() {
         let (td, mut gc) = _gcroots();
         let link = td.path().join("f0vdg3cb0005ksjb0fd5qs6f56zg2qs5");
         unix::fs::symlink("changeme", &link).unwrap();
-        let _ = gc.link(td.path(), "/nix/store/f0vdg3cb0005ksjb0fd5qs6f56zg2qs5-v");
+        let _ = gc.link(td.path(), "f0vdg3cb0005ksjb0fd5qs6f56zg2qs5-v");
         assert_eq!(
-            fs::read_link(&link).unwrap(),
-            PathBuf::from("/nix/store/f0vdg3cb0005ksjb0fd5qs6f56zg2qs5-v")
+            PathBuf::from("/nix/store/f0vdg3cb0005ksjb0fd5qs6f56zg2qs5-v"),
+            fs::read_link(&link).unwrap()
         );
     }
 

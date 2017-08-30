@@ -8,6 +8,9 @@ error_chain! {
         Fmt(::std::fmt::Error);
         Ignore(ignore::Error);
         Io(::std::io::Error);
+        MiniLZO(::minilzo::Error);
+        RMPDecode(::rmp_serde::decode::Error);
+        RMPEncode(::rmp_serde::encode::Error);
         StripPrefix(::std::path::StripPrefixError);
         Zip(::zip::result::ZipError);
     }

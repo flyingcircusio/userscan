@@ -5,6 +5,9 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use super::*;
 
+#[cfg(feature = "profile")]
+mod profile;
+
 lazy_static! {
     pub static ref FIXTURES: PathBuf = Path::new(file!()).parent().unwrap().join("../../fixtures")
         .canonicalize().unwrap();

@@ -1,5 +1,6 @@
 use errors::*;
 use fnv::FnvHashMap;
+use minilzo;
 use nix::fcntl;
 use output::p2s;
 use rmp_serde::{encode, decode};
@@ -19,6 +20,12 @@ pub struct CacheLine {
     pub used: bool,
 }
 
+impl PartialEq for CacheLine {
+    fn eq(&self, other: &CacheLine) -> bool {
+        self.ctime == other.ctime && self.ctime_nsec == other.ctime_nsec && self.refs == other.refs
+    }
+}
+
 impl CacheLine {
     #[allow(dead_code)]
     pub fn new(ctime: i64, ctime_nsec: i64, refs: &[PathBuf]) -> Self {
@@ -28,12 +35,6 @@ impl CacheLine {
             refs: refs.to_vec(),
             used: true,
         }
-    }
-}
-
-impl PartialEq for CacheLine {
-    fn eq(&self, other: &CacheLine) -> bool {
-        self.ctime == other.ctime && self.ctime_nsec == other.ctime_nsec && self.refs == other.refs
     }
 }
 
@@ -56,19 +57,10 @@ pub fn open_locked<P: AsRef<Path>>(path: P) -> Result<fs::File> {
     Ok(f)
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+/// Persistent cache data structure. Maps inode numbers to cache lines.
+#[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]
 pub struct CacheMap {
-    v: u8,
     map: FnvHashMap<u64, CacheLine>,
-}
-
-impl Default for CacheMap {
-    fn default() -> Self {
-        CacheMap {
-            v: 1,
-            map: FnvHashMap::default(),
-        }
-    }
 }
 
 impl CacheMap {
@@ -79,19 +71,26 @@ impl CacheMap {
 
     /// Reads a cache file into a CacheMap structure
     pub fn load<P: AsRef<Path>>(file: &mut fs::File, filename: P) -> Result<CacheMap> {
+        let mut compr = Vec::new();
         file.seek(io::SeekFrom::Start(0))?;
-        let r = io::BufReader::with_capacity(1 << 20, file);
-        decode::from_read(r).chain_err(|| format!("format error in cache file {}", p2s(filename)))
+        file.read_to_end(&mut compr).chain_err(|| {
+            format!("error while reading {}", p2s(&filename))
+        })?;
+        decode::from_slice(&minilzo::decompress(&compr, compr.len() * 10).chain_err(
+            || {
+                format!("failed to decompress {}", p2s(&filename))
+            },
+        )?).chain_err(|| {
+            format!("format error {} (try to delete and re-run)", p2s(&filename))
+        })
     }
 
     /// Writes a CacheMap structure into an open file
     pub fn save<P: AsRef<Path>>(&self, file: &mut fs::File, filename: P) -> Result<()> {
         file.seek(io::SeekFrom::Start(0))?;
         file.set_len(0)?;
-        let mut w = io::BufWriter::with_capacity(1 << 20, file);
-        encode::write(&mut w, self).chain_err(|| {
-            format!("cannot write cache file {}", p2s(filename))
-        })
+        file.write_all(&minilzo::compress(&encode::to_vec(self)?)?)
+            .chain_err(|| format!("error while writing {}", p2s(&filename)))
     }
 }
 
@@ -108,7 +107,6 @@ impl DerefMut for CacheMap {
         &mut self.map
     }
 }
-
 
 
 #[cfg(test)]
@@ -145,6 +143,6 @@ mod tests {
                 &[PathBuf::from("/nix/ref1"), PathBuf::from("/nix/ref2")][..],
             ),
         );
-        CacheMap { v: 1, map: cm }
+        CacheMap { map: cm }
     }
 }

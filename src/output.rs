@@ -8,6 +8,7 @@ use std::io;
 use std::io::prelude::*;
 use std::path::Path;
 use std::time::Duration;
+use super::STORE;
 
 pub fn fmt_error_chain(err: &Error) -> String {
     err.iter()
@@ -77,6 +78,9 @@ impl Output {
             .expect("log init may only be called once");
     }
 
+    /// Outputs the name of a scanned file together with the store paths found inside.
+    ///
+    /// Depending on the desired output format the files are either space- or newline-separated.
     pub fn write_store_paths(&self, w: &mut Write, sp: &StorePaths) -> io::Result<()> {
         let filename = format!(
             "{}{}",
@@ -86,7 +90,7 @@ impl Output {
         write!(w, "{}", filename.purple().bold())?;
         let sep = if self.oneline { " " } else { "\n" };
         for r in sp.iter_refs() {
-            write!(w, "{}{}", sep, r.display())?
+            write!(w, "{}{}{}", sep, STORE, r.display())?
         }
         writeln!(w, "{}", if self.oneline { "" } else { "\n" })
     }

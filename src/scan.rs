@@ -20,7 +20,7 @@ use zip::result::ZipError;
 
 lazy_static! {
     static ref STORE_RE: Regex = Regex::new(
-        r"(?-u)(/nix/store/[0-9a-z]{32}-[0-9a-zA-Z+._?=-]+)").unwrap();
+        r"(?-u)/nix/store/([0-9a-z]{32}-[0-9a-zA-Z+._?=-]+)").unwrap();
 }
 
 const MIN_STOREREF_LEN: u64 = 45;
@@ -69,8 +69,8 @@ fn scan_regular_quickcheck(
     let bytes_scanned = meta.len();
     Ok(ScanResult {
         refs: STORE_RE
-            .find_iter(&buf)
-            .map(|match_| OsStr::from_bytes(match_.as_bytes()).into())
+            .captures_iter(&buf)
+            .map(|cap| OsStr::from_bytes(&cap[1]).into())
             .collect(),
         meta,
         bytes_scanned,
@@ -113,8 +113,8 @@ fn scan_zip_archive(dent: &DirEntry) -> Result<ScanResult> {
     for i in 0..archive.len() {
         let mut f = archive.by_index(i)?;
         f.read_to_end(&mut buf)?;
-        refs.extend(STORE_RE.find_iter(&buf).map(|match_| {
-            OsStr::from_bytes(match_.as_bytes()).into()
+        refs.extend(STORE_RE.captures_iter(&buf).map(|cap| {
+            OsStr::from_bytes(&cap[1]).into()
         }));
     }
     let bytes_scanned = meta.len();
@@ -130,8 +130,8 @@ fn scan_symlink(dent: &DirEntry) -> Result<ScanResult> {
     let meta = dent.metadata()?;
     let target = fs::read_link(dent.path())?;
     let len = target.as_os_str().len() as u64;
-    let refs = match STORE_RE.find(&target.as_os_str().as_bytes()) {
-        Some(match_) => vec![OsStr::from_bytes(match_.as_bytes()).into()],
+    let refs = match STORE_RE.captures(target.as_os_str().as_bytes()) {
+        Some(cap) => vec![OsStr::from_bytes(&cap[1]).into()],
         None => vec![],
     };
     Ok(ScanResult {
@@ -208,7 +208,7 @@ mod tests {
                 .refs()
                 .to_vec(),
             |path| path.to_string_lossy().into_owned(),
-            &["/nix/store/q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24"],
+            &["q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24"],
         );
         scanner.quickcheck = 4096;
         assert_eq_vecs(
@@ -238,9 +238,7 @@ mod tests {
             .find_paths(dent("miniegg-1-py3.5.egg"))
             .unwrap();
         assert_eq!(
-            vec![
-                Path::new("/nix/store/76lhp1gvc3wbl6q4p2qgn2n7245imyvr-perl-5.22.3"),
-            ],
+            vec![Path::new("76lhp1gvc3wbl6q4p2qgn2n7245imyvr-perl-5.22.3")],
             *sp.refs()
         );
         assert_eq!(2226, sp.bytes_scanned());
@@ -257,9 +255,7 @@ mod tests {
             .find_paths(dent("dir2/lftp"))
             .expect("mask ZIP error");
         assert_eq!(
-            vec![
-                Path::new("/nix/store/q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24"),
-            ],
+            vec![Path::new("q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24")],
             *sp.refs()
         );
     }

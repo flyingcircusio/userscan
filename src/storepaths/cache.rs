@@ -154,21 +154,19 @@ impl Cache {
 
 #[cfg(test)]
 mod tests {
-    extern crate tree_magic;
+    extern crate tempdir;
 
     use std::fs;
     use super::*;
+    use self::tempdir::TempDir;
     use super::Lookup::*;
     use tests::{FIXTURES, dent};
-    use tempdir::TempDir;
 
     fn sp_dummy() -> StorePaths {
         let dent = tests::dent("dir2/lftp");
         StorePaths {
             dent: dent,
-            refs: vec![
-                PathBuf::from("/nix/store/q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24"),
-            ],
+            refs: vec![PathBuf::from("q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24")],
             cached: false,
             bytes_scanned: 0,
             metadata: None,
@@ -207,9 +205,7 @@ mod tests {
         match c.lookup(tests::dent("dir2/lftp")) {
             Hit(sp) => {
                 assert_eq!(
-                    vec![
-                        PathBuf::from("/nix/store/q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24"),
-                    ],
+                    vec![PathBuf::from("q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24")],
                     sp.refs
                 )
             }

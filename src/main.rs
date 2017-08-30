@@ -1,9 +1,12 @@
+#![recursion_limit="256"]
+
 extern crate atty;
 extern crate bytesize;
 extern crate colored;
 extern crate env_logger;
 extern crate fnv;
 extern crate ignore;
+extern crate minilzo;
 extern crate nix;
 extern crate rmp_serde;
 extern crate serde;
@@ -19,9 +22,6 @@ extern crate lazy_static;
 extern crate log;
 #[macro_use]
 extern crate serde_derive;
-
-#[cfg(test)]
-extern crate tempdir;
 
 mod errors;
 mod output;
@@ -52,6 +52,7 @@ use users::Users;
 use users::cache::UsersCache;
 use users::os::unix::UserExt;
 
+static STORE: &str = "/nix/store/";
 static GC_PREFIX: &str = "/nix/var/nix/gcroots/profiles/per-user";
 static DOTEXCLUDE: &str = ".userscan-ignore";
 
