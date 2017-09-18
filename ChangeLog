@@ -1,5 +1,7 @@
 2017-09-18  Christian Kauhaus <kc@flyingcircus.io>
 
+	* Release 0.3.0
+
 	* Change behaviour of --list: It doesn't register found references by
 	default anymore. Specify --list --register to get both (#11).
 
