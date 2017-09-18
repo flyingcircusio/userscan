@@ -68,7 +68,7 @@ impl GCRoots {
     }
 
     fn create_link(&mut self, dir: &Path, linkname: PathBuf, target: &Path) -> Result<usize> {
-        debug!("linking {}", linkname.display());
+        info!("creating link {}", linkname.display());
         fs::create_dir_all(dir).chain_err(|| {
             format!("failed to create GC dir {}", dir.display())
         })?;
@@ -148,7 +148,7 @@ impl GCRoots {
                         if self.seen.contains(path) {
                             Ok(0)
                         } else {
-                            debug!("unlinking {}", path.display());
+                            info!("removing link {}", path.display());
                             fs::remove_file(path)?;
                             Ok(1)
                         }

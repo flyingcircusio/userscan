@@ -19,10 +19,10 @@ pub fn fmt_error_chain(err: &Error) -> String {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Output {
-    level: LogLevelFilter,
-    oneline: bool,
-    color: Option<bool>,
-    list: bool,
+    pub level: LogLevelFilter,
+    pub oneline: bool,
+    pub color: Option<bool>,
+    pub list: bool,
 }
 
 impl Default for Output {

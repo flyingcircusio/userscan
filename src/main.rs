@@ -141,7 +141,7 @@ impl App {
     }
 
     fn statistics(&self) -> Statistics {
-        Statistics::new(self.detailed_statistics)
+        Statistics::new(self.detailed_statistics, self.output.list)
     }
 
     fn startdir(&self) -> Result<PathBuf> {
@@ -193,7 +193,7 @@ impl<'a> From<ArgMatches<'a>> for App {
             a.is_present("debug"),
             a.is_present("oneline"),
             a.value_of("color"),
-            a.is_present("list") || a.is_present("no-register"),
+            a.is_present("list"),
         );
 
         let mut overrides: Vec<String> = vec![];
@@ -213,7 +213,7 @@ impl<'a> From<ArgMatches<'a>> for App {
                     .unwrap(),
             ),
             output,
-            register: !a.is_present("no-register"),
+            register: !a.is_present("list") || a.is_present("register"),
             cachefile: a.value_of_os("cache").map(PathBuf::from),
             detailed_statistics: a.is_present("stats"),
             sleep_ms: a.value_of("stutter").map(|val| val.parse::<f32>().unwrap()),
@@ -252,36 +252,46 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
 
     clap::App::new(crate_name!())
         .version(crate_version!())
-        .author("© Flying Circus Internet Operations GmbH and contributors")
+        .author(
+            "© Flying Circus Internet Operations GmbH and contributors.",
+        )
         .about(crate_description!())
         .usage(USAGE.as_str())
         .after_help(AFTER_HELP.as_str())
         .arg(
-            Arg::with_name("DIRECTORY").help("Starts scan in DIRECTORY").required(true)
-        )
-        .arg(
-            a("l", "list", "Prints Nix store references while scanning")
-            .long_help(
-                "Prints Nix store references while scanning. GC roots are registered by default, \
-                 except when the -R/--no-register option is given"
-            ).display_order(1),
+            Arg::with_name("DIRECTORY")
+                .help("Starts scan in DIRECTORY")
+                .required(true),
         )
         .arg(
             a(
-                "R",
-                "no-register",
-                "Don't register found references, implies --list",
-            ).display_order(2),
+                "l",
+                "list",
+                "Only prints Nix store references while scanning (doesn't register)",
+            ).long_help(
+                "Prints Nix store references while scanning. GC roots are not registered when \
+                 this option is active. Specify -r/--register in addition to get both listing and \
+                 registration.",
+            )
+                .display_order(1),
         )
         .arg(
             a(
-                "c",
-                "cache",
-                "Keeps results between runs in FILE",
-            ).value_name("FILE")
+                "r",
+                "register",
+                "Registers references even when in list mode",
+            ).long_help(
+                "Registers references even when in list mode. Registration is enabled by default \
+                 if -l/--list not given.",
+            )
+                .display_order(2),
+        )
+        .arg(
+            a("c", "cache", "Keeps results between runs in FILE")
+                .value_name("FILE")
                 .long_help(
                     "Caches scan results in FILE to avoid re-scanning unchanged files. \
-                     The cache is kept as a compressed messagepack file",
+                     The cache is kept as a compressed messagepack file.",
                 )
                 .takes_value(true),
         )
@@ -298,7 +308,7 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
                 .default_value("auto")
                 .long_help(
                     "Turns on funky colorful output. If set to \"auto\", color is on if \
-                     run in a terminal",
+                     run in a terminal.",
                 ),
         )
         .arg(a(
@@ -311,7 +321,7 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
                 .value_name("SLEEP")
                 .long_help(
                     "Sleeps SLEEP milliseconds after each file to reduce I/O load. Files \
-                     loaded from the cache are not subject to stuttering",
+                     loaded from the cache are not subject to stuttering.",
                 )
                 .takes_value(true)
                 .validator(validate_stutter),
@@ -321,7 +331,7 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
             a(
                 "d",
                 "debug",
-                "Shows every file opened and lots of other stuff. Implies --verbose",
+                "Shows every file opened and lots of other stuff. Implies --verbose.",
             ).display_order(1000),
         )
         .arg(
@@ -330,7 +340,7 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
                 .long_help(
                     "Gives up if no Nix store references are found in the first SIZE kilobytes of \
                      a file. Assumes that at least one Nix store reference is located near the \
-                     beginning. Speeds up scanning large files considerably",
+                     beginning. Speeds up scanning large files considerably.",
                 )
                 .value_name("SIZE")
                 .default_value("256")
@@ -340,6 +350,7 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
         )
         .arg(
             a("e", "exclude", "Skips files matching GLOB")
+                .long_help("Skips files matching GLOB. May be given multiple times.")
                 .value_name("GLOB")
                 .takes_value(true)
                 .multiple(true)
@@ -347,6 +358,11 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
         )
         .arg(
             a("i", "include", "Scans only files matching GLOB")
+                .long_help(
+                    "Scans only files matching GLOB. May be given multiple times. Note \
+                     including individual files shows no effect if their containing directory is \
+                     matched by an exclude glob.",
+                )
                 .value_name("GLOB")
                 .takes_value(true)
                 .multiple(true)
@@ -356,7 +372,7 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
             a("E", "exclude-from", "Loads exclude globs from FILE")
                 .long_help(
                     "Loads exclude globs from FILE, which is expected to be in .gitignore format. \
-                     May be given multiple times",
+                     May be given multiple times.",
                 )
                 .value_name("FILE")
                 .takes_value(true)
@@ -370,7 +386,7 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
                 "Scans inside ZIP archives for files matching GLOB.",
             ).long_help(
                 "Unpacks all files with matching GLOB as ZIP archives and scans inside. \
-                     Accepts a comma-separated list of glob patterns [e.g., *.zip,*.egg]",
+                     Accepts a comma-separated list of glob patterns. [example: *.zip,*.egg]",
             )
                 .value_name("GLOB,...")
                 .takes_value(true)
@@ -394,18 +410,31 @@ fn main() {
 pub mod test {
     use super::*;
 
+    fn app(opts: &[&str]) -> App {
+        let mut cmdline = vec!["app"];
+        cmdline.extend_from_slice(&opts);
+        cmdline.push("dir");
+        App::from(args().get_matches_from(cmdline))
+    }
+
     #[test]
     fn overrides_should_be_collected_and_prefixed() {
-        let a = App::from(args().get_matches_from(vec![
-            "app",
-            "-i",
-            "glob1",
-            "-e",
-            "glob2",
-            "-i",
-            "glob3",
-            "dir",
-        ]));
+        let a = app(&["-i", "glob1", "-e", "glob2", "-i", "glob3"]);
         assert_eq!(vec!["!glob2", "glob1", "glob3"], a.overrides);
+    }
+
+    #[test]
+    fn list_should_disable_register() {
+        let a = app(&[]);
+        assert!(!a.output.list);
+        assert!(a.register);
+
+        let a = app(&["--list"]);
+        assert!(a.output.list);
+        assert!(!a.register);
+
+        let a = app(&["--list", "--register"]);
+        assert!(a.output.list);
+        assert!(a.register);
     }
 }

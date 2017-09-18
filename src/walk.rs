@@ -103,7 +103,7 @@ pub fn spawn_threads(app: &App, gcroots: &mut Register) -> Result<Statistics> {
     let mut cache = crossbeam::scope(|threads| -> Result<Arc<Cache>> {
         let pctx = ProcessingContext::create(app, &mut stats, gcroots)?;
         let walker = app.walker()?.build_parallel();
-        info!("{}: Scouting {} ...", crate_name!(), p2s(&app.startdir));
+        info!("{}: Scouting {}", crate_name!(), p2s(&app.startdir));
         if let Some(dur) = pctx.sleep {
             debug!("stutter {:?}", dur);
         }
@@ -112,11 +112,15 @@ pub fn spawn_threads(app: &App, gcroots: &mut Register) -> Result<Statistics> {
         gcroots.register_loop()?;
         walk_hdl.join()
     })?;
-    Arc::get_mut(&mut cache)
-        .expect("BUG: dangling references to cache")
-        .commit()?;
-    cache.log_statistics();
+    if app.register {
+        // don't touch cache if in no-register mode
+        Arc::get_mut(&mut cache)
+            .expect("BUG: dangling references to cache")
+            .commit()?;
+        cache.log_statistics();
+    }
     stats.log_summary();
+    info!("{}: Finished {}", crate_name!(), p2s(&app.startdir));
     Ok(stats)
 }
 

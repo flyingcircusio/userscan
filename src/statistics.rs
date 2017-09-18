@@ -98,7 +98,7 @@ pub struct Statistics {
 const SHOW_NOT_BEFORE: u64 = 5;
 
 impl Statistics {
-    pub fn new(detailed: bool) -> Self {
+    pub fn new(detailed: bool, quiet: bool) -> Self {
         Statistics {
             softerrors: 0,
             total: Pair::default(),
@@ -106,7 +106,7 @@ impl Statistics {
             rx: None,
             start: time::Instant::now(),
             detailed,
-            progress: atty::is(Stream::Stderr),
+            progress: !quiet && atty::is(Stream::Stderr),
             progress_last: SHOW_NOT_BEFORE,
         }
     }
@@ -166,23 +166,24 @@ impl Statistics {
     }
 
     pub fn print_details(&self) {
-        if self.by_ext.len() > 0 {
-            println!(
-                "Top 10 scanned file extensions:\n\
-                      extension  #files  read"
-            );
-            for (files, bytes, ext) in map2vec(&self.by_ext, 10) {
-                if !ext.is_empty() {
-                    println!(
-                        "{:-10} {:6}  {}",
-                        ext.to_string_lossy(),
-                        files,
-                        ByteSize::b(bytes as usize)
-                    );
-                }
-            }
-            println!();
+        if self.by_ext.len() <= 1 {
+            return;
         }
+        println!(
+            "Top 10 scanned file extensions:\n\
+                  extension  #files  read"
+        );
+        for (files, bytes, ext) in map2vec(&self.by_ext, 10) {
+            if !ext.is_empty() {
+                println!(
+                    "{:-10} {:6}  {}",
+                    ext.to_string_lossy(),
+                    files,
+                    ByteSize::b(bytes as usize)
+                );
+            }
+        }
+        println!();
     }
 
     pub fn log_summary(&self) {
@@ -218,7 +219,7 @@ mod tests {
 
     #[test]
     fn add_single_item_with_details() {
-        let mut s = Statistics::new(true);
+        let mut s = Statistics::new(true, false);
         s.process(_msg_read(3498, "jpg"));
         assert_eq!(s.total, Pair::new(1, 3498));
         assert_eq!(s.by_ext.len(), 1);
@@ -226,14 +227,14 @@ mod tests {
 
     #[test]
     fn add_single_item_no_details() {
-        let mut s = Statistics::new(false);
+        let mut s = Statistics::new(false, false);
         s.process(_msg_read(3498, "jpg"));
         assert_eq!(s.by_ext.len(), 0);
     }
 
     #[test]
     fn add_softerrors() {
-        let mut s = Statistics::new(false);
+        let mut s = Statistics::new(false, false);
         s.process(StatsMsg::SoftError);
         s.process(StatsMsg::SoftError);
         s.process(StatsMsg::SoftError);
@@ -242,7 +243,7 @@ mod tests {
 
     #[test]
     fn account_extensions() {
-        let mut s = Statistics::new(true);
+        let mut s = Statistics::new(true, false);
         s.process(_msg_read(45, "png"));
         s.process(_msg_read(21, "jpg"));
         s.process(_msg_read(85, "png"));
@@ -255,7 +256,7 @@ mod tests {
 
     #[test]
     fn map2vec_extensions() {
-        let mut s = Statistics::new(true);
+        let mut s = Statistics::new(true, false);
         s.process(_msg_read(45, "png"));
         s.process(_msg_read(21, "jpg"));
         s.process(_msg_read(85, "png"));
@@ -270,7 +271,7 @@ mod tests {
 
     #[test]
     fn map2vec_cutoff() {
-        let mut s = Statistics::new(true);
+        let mut s = Statistics::new(true, false);
         s.process(_msg_read(95, "png"));
         s.process(_msg_read(31, "png"));
         s.process(_msg_read(21, "jpg"));
