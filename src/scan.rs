@@ -2,6 +2,7 @@ extern crate memmap;
 extern crate regex;
 extern crate twoway;
 
+use bytesize::ByteSize;
 use errors::*;
 use ignore::{DirEntry, Match};
 use ignore::overrides::Override;
@@ -95,6 +96,13 @@ fn scan_regular(dent: &DirEntry, quickcheck: usize) -> Result<ScanResult> {
 fn scan_zip_archive(dent: &DirEntry) -> Result<ScanResult> {
     debug!("Scanning ZIP archive {}", dent.path().display());
     let meta = dent.metadata()?;
+    if meta.len() > 2 << 20 {
+        warn!(
+            "{}: unpacking large ZIP files may be slow ({})",
+            p2s(dent.path()),
+            ByteSize::b(meta.len() as usize)
+        );
+    }
     let mut archive = match ZipArchive::new(fs::File::open(&dent.path())?) {
         Ok(a) => a,
         Err(ZipError::InvalidArchive(e)) |
