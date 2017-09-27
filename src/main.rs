@@ -311,11 +311,13 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
                      run in a terminal.",
                 ),
         )
-        .arg(a(
-            "S",
-            "stats",
-            "Prints detailed statistics like scans per file type",
-        ))
+        .arg(
+            a(
+                "S",
+                "stats",
+                "Prints detailed statistics like scans per file type",
+            ).alias("statistics"),
+        )
         .arg(
             a("s", "stutter", "Sleeps SLEEP ms after each file access")
                 .value_name("SLEEP")
