@@ -4,7 +4,6 @@
 :manual_section: 1
 :copyright: Flying Circus Internet Operations GmbH and contributors
 :author: Christian Kauhaus
-:date: @date@
 :version: @version@
 
 SYNOPSIS
@@ -27,8 +26,8 @@ OPTIONS
 
 **--cache**, **-c** *FILE*
     Preserves scan results between runs to avoid re-scanning unchanged files.
-    The ctime inode attribute is used to decide whether a file has changed or
-    not.
+    For each file, the ctime inode attribute is used to decide whether it has
+    been changed or not.
 
 **--color**, **-C** [ **always** | **never** | **auto** ]
     Turns on funky colorful output. If set to **auto**, color is on only if run

@@ -1,3 +1,11 @@
+2017-09-28  Christian Kauhaus <kc@flyingcircus.io>
+
+	* Release 0.3.2
+
+	* Cache: Warn if trying to load a broken cache file, but don't abort.
+
+	* Docs: Add man page (#8).
+
 2017-09-18  Christian Kauhaus <kc@flyingcircus.io>
 
 	* Release 0.3.1

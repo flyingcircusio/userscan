@@ -58,7 +58,7 @@ impl Cache {
             debug!("writing {} entries to cache", map.len());
             map.save(file, &self.filename)
         } else {
-            // don't do anything if there is no file set except for evicting unused elements
+            // don't do anything if there is no cache file except for evicting unused elements
             Ok(())
         }
     }

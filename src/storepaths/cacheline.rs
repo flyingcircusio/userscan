@@ -76,13 +76,19 @@ impl CacheMap {
         file.read_to_end(&mut compr).chain_err(|| {
             format!("error while reading {}", p2s(&filename))
         })?;
-        decode::from_slice(&minilzo::decompress(&compr, compr.len() * 10).chain_err(
-            || {
-                format!("failed to decompress {}", p2s(&filename))
-            },
-        )?).chain_err(|| {
-            format!("format error {} (try to delete and re-run)", p2s(&filename))
-        })
+        match minilzo::decompress(&compr, compr.len() * 10)
+            .map_err(|e| e.into())
+            .and_then(|data| decode::from_slice(&data).map_err(|e| Error::from(e))) {
+            Ok(cachemap) => Ok(cachemap),
+            Err(err) => {
+                warn!(
+                    "Problem while trying to load cache from {}: {} - continuing with empty cache",
+                    p2s(&filename),
+                    err
+                );
+                Ok(Self::default())
+            }
+        }
     }
 
     /// Writes a CacheMap structure into an open file
@@ -111,6 +117,9 @@ impl DerefMut for CacheMap {
 
 #[cfg(test)]
 mod tests {
+    extern crate tempdir;
+    use self::tempdir::TempDir;
+    use tests::FIXTURES;
     use super::*;
 
     #[test]
@@ -131,7 +140,6 @@ mod tests {
         )
     }
 
-    #[allow(dead_code)]
     fn dummy_cachemap() -> CacheMap {
         let mut cm = FnvHashMap::default();
         cm.insert(1, CacheLine::new(10, 11, &[PathBuf::from("/nix/ref1")][..]));
@@ -144,5 +152,37 @@ mod tests {
             ),
         );
         CacheMap { map: cm }
+    }
+
+    #[test]
+    fn save_should_create_file() {
+        let tempdir = TempDir::new("save-cache").expect("failed to create tempdir");
+        let filename = tempdir.path().join("cache");
+        {
+            let mut f = open_locked(&filename).unwrap();
+            assert!(dummy_cachemap().save(&mut f, &filename).is_ok());
+        }
+        assert!(fs::metadata(&filename).unwrap().len() > 0);
+    }
+
+    #[test]
+    fn load_should_decompress_cachefile() {
+        let tempdir = TempDir::new("load-cache").expect("failed to create tempdir");
+        let filename = tempdir.path().join("cache.ok");
+        fs::copy(FIXTURES.join("cache.mp"), &filename).unwrap();
+        let mut f = open_locked(&filename).unwrap();
+        let cm = CacheMap::load(&mut f, &filename).unwrap();
+        assert_eq!(cm.map.len(), 12);
+    }
+
+    #[test]
+    fn load_should_ignore_broken_cachefile() {
+        let tempdir = TempDir::new("load-cache").expect("failed to create tempdir");
+        let filename = tempdir.path().join("cache.truncated");
+        fs::copy(FIXTURES.join("cache.mp"), &filename).unwrap();
+        let mut f = open_locked(&filename).unwrap();
+        f.set_len(500).unwrap();
+        let cm = CacheMap::load(&mut f, &filename).expect("should ignore truncated cache file");
+        assert_eq!(cm.map.len(), 0);
     }
 }
