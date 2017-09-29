@@ -140,8 +140,8 @@ Unpacking of large ZIP archives or those containing very many files is unduly
 slow. Try to avoid **-z** if possible.
 
 
-EXAMPLE
-=======
+EXAMPLES
+========
 
 Scan files and register references starting at the current directory. Give a
 high-level summary and a break-down per extension:

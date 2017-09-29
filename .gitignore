@@ -1,3 +1,4 @@
+dist/
 **/*.rs.bk
 .*.sw?
 tags

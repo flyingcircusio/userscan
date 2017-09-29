@@ -60,6 +60,12 @@ All GC root registrations for a given dir $DIR go into
 inspected by the administrator. Should a reference vanish at the original
 location, the registration will be cleaned up by the next run.
 
+## Hacking
+
+`fc-userscan` compiles on Rust 1.19.0 or higher. I'll happily accect pull
+requests at the [GitHub repository](https://github.com/flyingcircusio/userscan).
+Please write tests if feasible.
+
 ## Contact
 
 The primary author of `fc-userscan` is [Christian
