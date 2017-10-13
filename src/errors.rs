@@ -1,3 +1,5 @@
+#![allow(unused_doc_comment)]
+
 use clap;
 use ignore;
 use std::path::PathBuf;
