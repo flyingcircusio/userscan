@@ -43,5 +43,5 @@ tempdir = "0.3"
 [features]
 profile = ["cpuprofiler"]
 
-[profile.test]
-#opt-level = 1
+[profile.dev]
+codegen-units = 4
