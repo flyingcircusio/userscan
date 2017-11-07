@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, PartialOrd, Clone, Serialize, Deserialize)]
 pub struct CacheLine {
     pub ctime: i64,
-    pub ctime_nsec: i64,
+    pub ctime_nsec: u8,
     pub refs: Vec<PathBuf>,
     #[serde(skip)]
     pub used: bool,
@@ -27,8 +27,7 @@ impl PartialEq for CacheLine {
 }
 
 impl CacheLine {
-    #[allow(dead_code)]
-    pub fn new(ctime: i64, ctime_nsec: i64, refs: &[PathBuf]) -> Self {
+    pub fn new(ctime: i64, ctime_nsec: u8, refs: &[PathBuf]) -> Self {
         Self {
             ctime,
             ctime_nsec,
@@ -172,7 +171,7 @@ mod tests {
         fs::copy(FIXTURES.join("cache.mp"), &filename).unwrap();
         let mut f = open_locked(&filename).unwrap();
         let cm = CacheMap::load(&mut f, &filename).unwrap();
-        assert_eq!(cm.map.len(), 12);
+        assert_eq!(12, cm.map.len());
     }
 
     #[test]

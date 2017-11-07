@@ -180,7 +180,7 @@ impl Scanner {
         }
         if let Some(ft) = dent.file_type() {
             if let Some(res) = self.scan_inode(dent, ft) {
-                return res.chain_err(|| format!("{}", p2s(dent.path())));
+                return res.chain_err(|| "scan failure");
             }
         }
         // silent fall-through: no idea how to handle this DirEntry
