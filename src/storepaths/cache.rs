@@ -5,8 +5,8 @@ use output::p2s;
 use std::fs;
 use std::os::unix::prelude::*;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::RwLock;
 use super::cacheline::*;
 use super::{Lookup, StorePaths};
 
@@ -68,7 +68,7 @@ impl Cache {
         let mut map = self.map.write().expect("tainted lock");
         let c = map.get_mut(&ino).ok_or(ErrorKind::CacheNotFound)?;
         let meta = dent.metadata()?;
-        if c.ctime == meta.ctime() && c.ctime_nsec == meta.ctime_nsec() {
+        if c.ctime == meta.ctime() && c.ctime_nsec == meta.ctime_nsec() as u8 {
             c.used = true;
             Ok((c.refs.clone(), meta))
         } else {
@@ -111,11 +111,12 @@ impl Cache {
             return Ok(());
         }
         let meta = sp.metadata()?;
-        self.map.write().expect("tainted lock").insert(
+        let mut map = self.map.write().expect("tainted lock");
+        map.insert(
             sp.ino()?,
             CacheLine::new(
                 meta.ctime(),
-                meta.ctime_nsec(),
+                meta.ctime_nsec() as u8,
                 &sp.refs,
             ),
         );
