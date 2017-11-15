@@ -160,4 +160,4 @@ Scan home dir, using a cache and an exclude file:
 SEE ALSO
 ========
 
-    nix-collect-garbage(1), nix-store(1), gitignore(5)
+nix-collect-garbage(1), nix-store(1), gitignore(5)
