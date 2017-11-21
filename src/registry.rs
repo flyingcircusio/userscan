@@ -31,11 +31,16 @@ pub struct GCRoots {
     seen: HashSet<PathBuf>,
     output: Output,
     rx: Option<GCRootsRx>,
+    registered: usize,
 }
 
 /// IPC endpoint for garbage collection roots registry
 pub trait Register {
     fn register_loop(&mut self) -> Result<()>;
+
+    fn clean(&self) -> Result<()> {
+        Ok(())
+    }
 
     fn tx(&mut self) -> GCRootsTx;
 }
@@ -164,26 +169,30 @@ impl Register for GCRoots {
     fn register_loop(&mut self) -> Result<()> {
         match self.rx.take() {
             Some(rx) => {
-                let registered = rx.iter()
+                self.registered = rx.iter()
                     .map(|sp| self.register(&sp))
                     .sum::<Result<usize>>()?;
-                let cleaned = self.cleanup()?;
-                info!(
-                    "{} references in {}",
-                    self.seen.len().to_string().cyan(),
-                    p2s(&self.topdir)
-                );
-                if registered > 0 || cleaned > 0 {
-                    info!(
-                        "newly registered: {}, cleaned: {}",
-                        registered.to_string().green(),
-                        cleaned.to_string().purple()
-                    );
-                }
                 Ok(())
             }
             None => Ok(()),
         }
+    }
+
+    fn clean(&self) -> Result<()> {
+        let cleaned = self.cleanup()?;
+        info!(
+            "{} references in {}",
+            self.seen.len().to_string().cyan(),
+            p2s(&self.topdir)
+            );
+        if self.registered > 0 || cleaned > 0 {
+            info!(
+                "newly registered: {}, cleaned: {}",
+                self.registered.to_string().green(),
+                cleaned.to_string().purple()
+                );
+        }
+        Ok(())
     }
 
     fn tx(&mut self) -> GCRootsTx {

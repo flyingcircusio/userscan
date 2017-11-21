@@ -37,5 +37,10 @@ error_chain! {
             description("internal: cache miss")
             display("")
         }
+
+        CacheFull(max: usize) {
+            description("Cache is full - terminate and don't change CG anymore")
+            display("Cache limit {} exceeded", max)
+        }
     }
 }
