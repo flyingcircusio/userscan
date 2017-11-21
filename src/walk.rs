@@ -8,6 +8,7 @@ use scan::Scanner;
 use statistics::{Statistics, StatsMsg, StatsTx};
 use std::os::linux::fs::MetadataExt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 use storepaths::{Cache, Lookup};
@@ -21,6 +22,7 @@ struct ProcessingContext {
     scanner: Arc<Scanner>,
     stats: StatsTx,
     gc: GCRootsTx,
+    abort: Arc<AtomicBool>,
 }
 
 impl ProcessingContext {
@@ -32,6 +34,7 @@ impl ProcessingContext {
             scanner: Arc::new(app.scanner()?),
             stats: stats.tx(),
             gc: gcroots.tx(),
+            abort: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -59,12 +62,8 @@ impl ProcessingContext {
         if sp.metadata()?.st_dev() != self.startdev {
             return Ok(WalkState::Skip);
         }
-        self.cache.insert(&mut sp)?;
-        self.stats.send(StatsMsg::Scan((&sp).into())).chain_err(
-            || {
-                ErrorKind::WalkAbort
-            },
-        )?;
+        self.cache.insert(&mut sp).chain_err(|| ErrorKind::WalkAbort)?;
+        self.stats.send(StatsMsg::Scan((&sp).into())).chain_err(|| ErrorKind::WalkAbort)?;
         if !sp.is_empty() {
             self.gc.send(sp).chain_err(|| ErrorKind::WalkAbort)?;
         }
@@ -83,7 +82,11 @@ impl ProcessingContext {
                     .and_then(|dent| pctx.process_direntry(dent))
                     .unwrap_or_else(|err: Error| match err {
                         Error(ErrorKind::WalkContinue, _) => WalkState::Continue,
-                        Error(ErrorKind::WalkAbort, _) => WalkState::Quit,
+                        Error(ErrorKind::WalkAbort, _) => {
+                            error!("{}", &fmt_error_chain(&err)[2..]);
+                            pctx.abort.store(true, Ordering::SeqCst);
+                            WalkState::Quit
+                        },
                         _ => {
                             warn!("{}", fmt_error_chain(&err));
                             match pctx.stats.send(StatsMsg::SoftError) {
@@ -94,7 +97,11 @@ impl ProcessingContext {
                     })
             })
         });
-        Ok(self.cache)
+        if self.abort.load(Ordering::SeqCst) {
+            Err("Aborting program execution".into())
+        } else {
+            Ok(self.cache)
+        }
     }
 }
 
@@ -112,7 +119,9 @@ pub fn spawn_threads(app: &App, gcroots: &mut Register) -> Result<Statistics> {
         gcroots.register_loop()?;
         walk_hdl.join()
     })?;
+    info!("join point passed!");
     if app.register {
+        gcroots.clean()?;
         // don't touch cache if in no-register mode
         Arc::get_mut(&mut cache)
             .expect("BUG: dangling references to cache")

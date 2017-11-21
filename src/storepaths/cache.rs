@@ -18,11 +18,12 @@ pub struct Cache {
     dirty: AtomicBool,
     hits: AtomicUsize,
     misses: AtomicUsize,
+    limit: usize,
 }
 
 impl Cache {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(limit: Option<usize>) -> Self {
+        Cache { limit: limit.unwrap_or(0), .. Self::default() }
     }
 
     pub fn open<P: AsRef<Path>>(mut self, path: P) -> Result<Self> {
@@ -112,6 +113,9 @@ impl Cache {
         }
         let meta = sp.metadata()?;
         let mut map = self.map.write().expect("tainted lock");
+        if self.limit > 0 && map.len() >= self.limit {
+            return Err(ErrorKind::CacheFull(self.limit).into())
+        }
         map.insert(
             sp.ino()?,
             CacheLine::new(
@@ -174,17 +178,20 @@ mod tests {
         }
     }
 
-    #[test]
-    fn insert_cacheline() {
-        let c = Cache::new();
-        let dent = tests::dent("dir1/proto-http.la");
-        c.insert(&mut StorePaths {
-            dent: dent,
+    fn sp_fixture<P: AsRef<Path>>(path: P) -> StorePaths {
+        StorePaths {
+            dent: tests::dent(path),
             refs: vec![],
             cached: false,
             bytes_scanned: 0,
-            metadata: None,
-        }).expect("insert failed");
+            metadata: None
+        }
+    }
+
+    #[test]
+    fn insert_cacheline() {
+        let c = Cache::new(None);
+        c.insert(&mut sp_fixture("dir1/proto-http.la")).expect("insert failed");
 
         let dent = tests::dent("dir1/proto-http.la");
         let map = c.map.read().unwrap();
@@ -198,8 +205,16 @@ mod tests {
     }
 
     #[test]
+    fn insert_should_fail_on_limit() {
+        let c = Cache::new(Some(2));
+        c.insert(&mut sp_fixture("dir1/proto-http.la")).expect("ok");
+        c.insert(&mut sp_fixture("dir2/lftp")).expect("ok");
+        assert!(c.insert(&mut sp_fixture("dir2/lftp.offset")).is_err());
+    }
+
+    #[test]
     fn lookup_should_miss_on_changed_metadata() {
-        let c = Cache::new();
+        let c = Cache::new(None);
         let ino = tests::dent("dir2/lftp").ino().unwrap();
         c.insert(&mut sp_dummy()).expect("insert failed");
 
@@ -225,7 +240,7 @@ mod tests {
         let td = TempDir::new("load_save_cache").unwrap();
         let cache_file = td.path().join("cache.mp");
         fs::copy(FIXTURES.join("cache.mp"), &cache_file).unwrap();
-        let mut c = Cache::new().open(&cache_file).unwrap();
+        let mut c = Cache::new(None).open(&cache_file).unwrap();
         assert_eq!(12, c.len());
         assert!(!c.dirty.load(Ordering::SeqCst));
         for ref cl in c.map.read().unwrap().values() {

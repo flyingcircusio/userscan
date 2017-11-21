@@ -59,6 +59,7 @@ static DOTEXCLUDE: &str = ".userscan-ignore";
 #[derive(Debug, Clone)]
 pub struct App {
     cachefile: Option<PathBuf>,
+    cachelimit: Option<usize>,
     detailed_statistics: bool,
     output: Output,
     overrides: Vec<String>,
@@ -135,8 +136,8 @@ impl App {
 
     fn cache(&self) -> Result<Cache> {
         match self.cachefile {
-            Some(ref f) => Cache::new().open(f),
-            None => Ok(Cache::new()),
+            Some(ref f) => Cache::new(self.cachelimit).open(f),
+            None => Ok(Cache::new(self.cachelimit)),
         }
     }
 
@@ -176,6 +177,7 @@ impl Default for App {
             register: false,
             output: Output::default(),
             cachefile: None,
+            cachelimit: None,
             detailed_statistics: false,
             sleep_ms: None,
             overrides: vec![],
@@ -215,6 +217,7 @@ impl<'a> From<ArgMatches<'a>> for App {
             output,
             register: !a.is_present("list") || a.is_present("register"),
             cachefile: a.value_of_os("cache").map(PathBuf::from),
+            cachelimit: a.value_of("cache-limit").map(|val| val.parse::<usize>().unwrap()),
             detailed_statistics: a.is_present("stats"),
             sleep_ms: a.value_of("stutter").map(|val| val.parse::<f32>().unwrap()),
             overrides,
@@ -294,6 +297,18 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
                      The cache is kept as a compressed messagepack file.",
                 )
                 .takes_value(true),
+        )
+        .arg(
+            a("L", "cache-limit", "Limit cache to N entries")
+                .value_name("N")
+                .long_help(
+                    "Aborts program execution when trying to store more than N entries in the \
+                     cache. This helps to limit memory consumption.",
+                )
+                .takes_value(true)
+                .validator(|s: String| -> result::Result<(), String> {
+                    s.parse::<usize>().map(|_| ()).map_err(|e| e.to_string())
+                }),
         )
         .arg(a(
             "1",
