@@ -119,7 +119,6 @@ pub fn spawn_threads(app: &App, gcroots: &mut Register) -> Result<Statistics> {
         gcroots.register_loop()?;
         walk_hdl.join()
     })?;
-    info!("join point passed!");
     if app.register {
         gcroots.clean()?;
         // don't touch cache if in no-register mode

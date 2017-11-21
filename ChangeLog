@@ -1,3 +1,10 @@
+2017-11-21  Christian Kauhaus <kc@flyingcircus.io>
+
+	* Release 0.4.0
+
+	* Limit cache size via `-L` and abort after processing too many
+	inodes.
+
 2017-11-07  Christian Kauhaus <kc@flyingcircus.io>
 
 	* Cache: Reduce memory usage by cropping ctime_nsec values to u8.
