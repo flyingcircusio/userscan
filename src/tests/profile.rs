@@ -19,7 +19,9 @@ fn profile() {
         .start("/tmp/userscan.profile")
         .expect("Couldn't start profiler");
     app.run().expect("app run failed");
-    PROFILER.lock().unwrap().stop().expect(
-        "Couldn't stop profiler",
-    );
+    PROFILER
+        .lock()
+        .unwrap()
+        .stop()
+        .expect("Couldn't stop profiler");
 }

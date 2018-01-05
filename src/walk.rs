@@ -1,9 +1,9 @@
 extern crate crossbeam;
 
 use errors::*;
-use ignore::{self, DirEntry, WalkState, WalkParallel};
+use ignore::{self, DirEntry, WalkParallel, WalkState};
 use output::{fmt_error_chain, p2s};
-use registry::{Register, GCRootsTx};
+use registry::{GCRootsTx, Register};
 use scan::Scanner;
 use statistics::{Statistics, StatsMsg, StatsTx};
 use std::os::linux::fs::MetadataExt;
@@ -44,8 +44,7 @@ impl ProcessingContext {
     /// statistics collector.
     fn process_direntry(&self, dent: DirEntry) -> Result<WalkState> {
         let mut sp = match self.cache.lookup(dent) {
-            Lookup::Dir(sp) => sp,
-            Lookup::Hit(sp) => sp,
+            Lookup::Dir(sp) | Lookup::Hit(sp) => sp,
             Lookup::Miss(d) => {
                 if let Some(dur) = self.sleep {
                     thread::sleep(dur);
@@ -55,15 +54,19 @@ impl ProcessingContext {
         };
         if let Some(err) = sp.error() {
             warn!("{}", err);
-            self.stats.send(StatsMsg::SoftError).chain_err(
-                || ErrorKind::WalkAbort,
-            )?;
+            self.stats
+                .send(StatsMsg::SoftError)
+                .chain_err(|| ErrorKind::WalkAbort)?;
         }
         if sp.metadata()?.st_dev() != self.startdev {
             return Ok(WalkState::Skip);
         }
-        self.cache.insert(&mut sp).chain_err(|| ErrorKind::WalkAbort)?;
-        self.stats.send(StatsMsg::Scan((&sp).into())).chain_err(|| ErrorKind::WalkAbort)?;
+        self.cache
+            .insert(&mut sp)
+            .chain_err(|| ErrorKind::WalkAbort)?;
+        self.stats
+            .send(StatsMsg::Scan((&sp).into()))
+            .chain_err(|| ErrorKind::WalkAbort)?;
         if !sp.is_empty() {
             self.gc.send(sp).chain_err(|| ErrorKind::WalkAbort)?;
         }
@@ -74,10 +77,7 @@ impl ProcessingContext {
     fn walk(self, walker: WalkParallel) -> Result<Arc<Cache>> {
         walker.run(|| {
             let pctx = self.clone();
-            Box::new(move |res: ::std::result::Result<
-                DirEntry,
-                ignore::Error,
-            >| {
+            Box::new(move |res: ::std::result::Result<DirEntry, ignore::Error>| {
                 res.map_err(From::from)
                     .and_then(|dent| pctx.process_direntry(dent))
                     .unwrap_or_else(|err: Error| match err {
@@ -86,7 +86,7 @@ impl ProcessingContext {
                             error!("{}", &fmt_error_chain(&err)[2..]);
                             pctx.abort.store(true, Ordering::SeqCst);
                             WalkState::Quit
-                        },
+                        }
                         _ => {
                             warn!("{}", fmt_error_chain(&err));
                             match pctx.stats.send(StatsMsg::SoftError) {
@@ -132,7 +132,6 @@ pub fn spawn_threads(app: &App, gcroots: &mut Register) -> Result<Statistics> {
     Ok(stats)
 }
 
-
 #[cfg(test)]
 mod tests {
     extern crate tempdir;
@@ -140,7 +139,7 @@ mod tests {
     use registry;
     use ignore::WalkBuilder;
     use self::tempdir::TempDir;
-    use std::fs::{File, create_dir, set_permissions, Permissions};
+    use std::fs::{create_dir, set_permissions, File, Permissions};
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
@@ -228,8 +227,8 @@ mod tests {
     #[test]
     fn should_not_cross_devices() {
         let app = app("dir1");
-        let mut pctx = ProcessingContext::create(&app, &mut app.statistics(), &mut fake_gc())
-            .unwrap();
+        let mut pctx =
+            ProcessingContext::create(&app, &mut app.statistics(), &mut fake_gc()).unwrap();
         pctx.startdev = 0;
         let dent = app.walker().unwrap().build().next().unwrap().unwrap();
         assert_eq!(WalkState::Skip, pctx.process_direntry(dent).unwrap());
@@ -263,9 +262,7 @@ mod tests {
         let p = t.path();
 
         let mut users = MockUsers::with_current_uid(100);
-        users.add_user(User::new(100, "johndoe", 100).with_home_dir(
-            &*p.to_string_lossy(),
-        ));
+        users.add_user(User::new(100, "johndoe", 100).with_home_dir(&*p.to_string_lossy()));
         let mut app = app(p);
         app.dotexclude = false;
 

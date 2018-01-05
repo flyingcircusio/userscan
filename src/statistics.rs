@@ -120,7 +120,7 @@ impl Statistics {
             StatsMsg::Scan(f) => {
                 self.total += f.scanned;
                 if self.detailed {
-                    let by_ext = self.by_ext.entry(f.ext).or_insert(Pair::default());
+                    let by_ext = self.by_ext.entry(f.ext).or_insert_with(Pair::default);
                     *by_ext += f.scanned;
                 }
             }
@@ -143,20 +143,17 @@ impl Statistics {
     }
 
     pub fn receive_loop(&mut self) {
-        match self.rx.take() {
-            Some(rx) => {
-                for msg in rx {
-                    self.process(msg);
-                    if self.progress {
-                        self.print_progress();
-                    }
-                }
-                if self.progress && self.progress_last > SHOW_NOT_BEFORE {
-                    eprintln!()
+        if let Some(rx) = self.rx.take() {
+            for msg in rx {
+                self.process(msg);
+                if self.progress {
+                    self.print_progress();
                 }
             }
-            None => (),
-        }
+            if self.progress && self.progress_last > SHOW_NOT_BEFORE {
+                eprintln!()
+            }
+        };
     }
 
     pub fn tx(&mut self) -> StatsTx {
@@ -171,7 +168,7 @@ impl Statistics {
         }
         println!(
             "Top 10 scanned file extensions:\n\
-                  extension  #files  read"
+             extension  #files  read"
         );
         for (files, bytes, ext) in map2vec(&self.by_ext, 10) {
             if !ext.is_empty() {
@@ -203,7 +200,6 @@ impl Statistics {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

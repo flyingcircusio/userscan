@@ -45,18 +45,18 @@ impl StorePaths {
 
     #[inline]
     pub fn ino(&self) -> Result<u64> {
-        self.dent.ino().ok_or_else(|| {
-            ErrorKind::DentNoMetadata(self.path().to_path_buf()).into()
-        })
+        self.dent
+            .ino()
+            .ok_or_else(|| ErrorKind::DentNoMetadata(self.path().to_path_buf()).into())
     }
 
     pub fn metadata(&mut self) -> Result<fs::Metadata> {
         match self.metadata {
             Some(ref m) => Ok(m.clone()),
             None => {
-                let m = self.dent.metadata().chain_err(|| {
-                    ErrorKind::DentNoMetadata(self.path().to_path_buf())
-                })?;
+                let m = self.dent
+                    .metadata()
+                    .chain_err(|| ErrorKind::DentNoMetadata(self.path().to_path_buf()))?;
                 self.metadata = Some(m.clone());
                 Ok(m)
             }
@@ -90,7 +90,7 @@ impl fmt::Display for StorePaths {
             write!(f, "{}", self.dent.path().display())
         } else {
             write!(f, "{}:", self.dent.path().display())?;
-            for r in self.refs.iter() {
+            for r in &self.refs {
                 write!(f, " {}", r.display())?;
             }
             Ok(())

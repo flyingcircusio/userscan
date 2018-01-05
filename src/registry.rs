@@ -1,6 +1,6 @@
 use colored::Colorize;
 use errors::*;
-use ignore::{self, WalkBuilder, DirEntry};
+use ignore::{self, DirEntry, WalkBuilder};
 use output::{Output, p2s};
 use std::collections::HashSet;
 use std::env;
@@ -19,7 +19,7 @@ use users::get_effective_username;
 pub type GCRootsTx = mpsc::Sender<StorePaths>;
 pub type GCRootsRx = mpsc::Receiver<StorePaths>;
 
-fn extract_hash<'a>(path: &'a Path) -> &'a [u8] {
+fn extract_hash(path: &Path) -> &[u8] {
     &path.as_os_str().as_bytes()[..32]
 }
 
@@ -27,7 +27,7 @@ fn extract_hash<'a>(path: &'a Path) -> &'a [u8] {
 pub struct GCRoots {
     prefix: PathBuf, // /nix/var/nix/gcroots/profiles/per-user/$USER
     topdir: PathBuf, // e.g., $PREFIX/srv/www if /srv/www was scanned
-    cwd: PathBuf, // current dir when the scan was started
+    cwd: PathBuf,    // current dir when the scan was started
     seen: HashSet<PathBuf>,
     output: Output,
     rx: Option<GCRootsRx>,
@@ -52,9 +52,7 @@ impl GCRoots {
             None => return Err("failed to query current user name".into()),
         };
         let prefix = Path::new(peruser).join(&user);
-        let cwd = env::current_dir().chain_err(
-            || "failed to determine current dir",
-        )?;
+        let cwd = env::current_dir().chain_err(|| "failed to determine current dir")?;
         Ok(GCRoots {
             topdir: prefix.join(startdir.as_ref().strip_prefix("/")?),
             prefix,
@@ -66,20 +64,16 @@ impl GCRoots {
 
     /// Determines exactly where a GC link should live.
     fn gc_link_dir<P: AsRef<Path>>(&self, scanned: P) -> PathBuf {
-        let dir = scanned.as_ref().parent().unwrap_or(Path::new("."));
-        self.prefix.join(
-            self.cwd.join(dir).strip_prefix("/").unwrap(),
-        )
+        let dir = scanned.as_ref().parent().unwrap_or_else(|| Path::new("."));
+        self.prefix
+            .join(self.cwd.join(dir).strip_prefix("/").unwrap())
     }
 
     fn create_link(&mut self, dir: &Path, linkname: PathBuf, target: &Path) -> Result<usize> {
         info!("creating link {}", p2s(&linkname));
-        fs::create_dir_all(dir).chain_err(|| {
-            format!("failed to create GC dir {}", dir.display())
-        })?;
-        unix::fs::symlink(target, &linkname).chain_err(|| {
-            format!("failed to create symlink {}", linkname.display())
-        })?;
+        fs::create_dir_all(dir).chain_err(|| format!("failed to create GC dir {}", dir.display()))?;
+        unix::fs::symlink(target, &linkname)
+            .chain_err(|| format!("failed to create symlink {}", linkname.display()))?;
         self.seen.insert(linkname);
         Ok(1)
     }
@@ -88,9 +82,8 @@ impl GCRoots {
     ///
     /// `target` is assumed to be without leading `/nix/store/` prefix.
     fn link<P: AsRef<Path>, T: AsRef<Path>>(&mut self, dir: P, target: T) -> Result<usize> {
-        let linkname = dir.as_ref().join(&OsStr::from_bytes(
-            extract_hash(target.as_ref()),
-        ));
+        let linkname = dir.as_ref()
+            .join(&OsStr::from_bytes(extract_hash(target.as_ref())));
         let target = Path::new(STORE).join(target);
         if self.seen.contains(&linkname) {
             return Ok(0);
@@ -101,28 +94,23 @@ impl GCRoots {
                     self.seen.insert(linkname);
                     Ok(0)
                 } else {
-                    fs::remove_file(&linkname).chain_err(|| {
-                        format!("cannot remove {}", linkname.display())
-                    })?;
+                    fs::remove_file(&linkname)
+                        .chain_err(|| format!("cannot remove {}", linkname.display()))?;
                     self.create_link(dir.as_ref(), linkname, &target)
                 }
             }
-            Err(e) => {
-                match e.kind() {
-                    io::ErrorKind::NotFound => self.create_link(dir.as_ref(), linkname, &target),
-                    _ => {
-                        Err(e).chain_err(|| {
-                            format!("failed to evaluate existing link {}", linkname.display())
-                        })
-                    }
-                }
-            }
+            Err(e) => match e.kind() {
+                io::ErrorKind::NotFound => self.create_link(dir.as_ref(), linkname, &target),
+                _ => Err(e).chain_err(|| {
+                    format!("failed to evaluate existing link {}", linkname.display())
+                }),
+            },
         }
     }
 
     /// Registers all Nix store paths with the garbage collector.
     fn register(&mut self, sp: &StorePaths) -> Result<usize> {
-        self.output.print_store_paths(&sp)?;
+        self.output.print_store_paths(sp)?;
         let dir = self.gc_link_dir(sp.path());
         sp.iter_refs().map(|p| self.link(dir.as_path(), p)).sum()
     }
@@ -144,7 +132,7 @@ impl GCRoots {
                 let path = dent.path();
                 match dent.file_type() {
                     Some(ft) if ft.is_dir() => {
-                        for _removed in fs::remove_dir(path) {
+                        if fs::remove_dir(path).is_ok() {
                             debug!("removing empty dir {}", path.display())
                         }
                         Ok(0)
@@ -184,13 +172,13 @@ impl Register for GCRoots {
             "{} references in {}",
             self.seen.len().to_string().cyan(),
             p2s(&self.topdir)
-            );
+        );
         if self.registered > 0 || cleaned > 0 {
             info!(
                 "newly registered: {}, cleaned: {}",
                 self.registered.to_string().green(),
                 cleaned.to_string().purple()
-                );
+            );
         }
         Ok(())
     }
@@ -346,11 +334,8 @@ pub mod tests {
                     for storepaths in rx {
                         for r in storepaths.refs() {
                             let relpath = storepaths.path().strip_prefix(&self.prefix).unwrap();
-                            self.registered.push(format!(
-                                "{}|{}",
-                                relpath.display(),
-                                r.display()
-                            ));
+                            self.registered
+                                .push(format!("{}|{}", relpath.display(), r.display()));
                         }
                     }
                     Ok(())

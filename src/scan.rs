@@ -57,19 +57,19 @@ fn scan_regular_quickcheck(
     let mmap = Mmap::open_path(dent.path(), Protection::Read)?;
     let buf: &[u8] = unsafe { mmap.as_slice() };
     let cutoff = quickcheck as u64;
-    if cutoff > 0 && meta.len() > cutoff {
-        if twoway::find_bytes(&buf[0..quickcheck], b"/nix/store/").is_none() {
-            return Ok(ScanResult {
-                refs: vec![],
-                meta,
-                bytes_scanned: cutoff,
-            });
-        }
+    if cutoff > 0 && meta.len() > cutoff
+        && twoway::find_bytes(&buf[0..quickcheck], b"/nix/store/").is_none()
+    {
+        return Ok(ScanResult {
+            refs: vec![],
+            meta,
+            bytes_scanned: cutoff,
+        });
     }
     let bytes_scanned = meta.len();
     Ok(ScanResult {
         refs: STORE_RE
-            .captures_iter(&buf)
+            .captures_iter(buf)
             .map(|cap| OsStr::from_bytes(&cap[1]).into())
             .collect(),
         meta,
@@ -97,8 +97,7 @@ fn scan_zip_archive(dent: &DirEntry) -> Result<ScanResult> {
     let meta = dent.metadata()?;
     let mut archive = match ZipArchive::new(fs::File::open(&dent.path())?) {
         Ok(a) => a,
-        Err(ZipError::InvalidArchive(e)) |
-        Err(ZipError::UnsupportedArchive(e)) => {
+        Err(ZipError::InvalidArchive(e)) | Err(ZipError::UnsupportedArchive(e)) => {
             warn!(
                 "{}: failed to unpack ZIP archive: {}",
                 dent.path().display(),
@@ -119,9 +118,11 @@ fn scan_zip_archive(dent: &DirEntry) -> Result<ScanResult> {
     for i in 0..archive.len() {
         let mut f = archive.by_index(i)?;
         f.read_to_end(&mut buf)?;
-        refs.extend(STORE_RE.captures_iter(&buf).map(|cap| {
-            OsStr::from_bytes(&cap[1]).into()
-        }));
+        refs.extend(
+            STORE_RE
+                .captures_iter(&buf)
+                .map(|cap| OsStr::from_bytes(&cap[1]).into()),
+        );
     }
     let bytes_scanned = meta.len();
     Ok(ScanResult {
@@ -195,7 +196,6 @@ impl Scanner {
         })
     }
 }
-
 
 #[cfg(test)]
 mod tests {

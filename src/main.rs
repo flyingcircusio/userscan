@@ -1,27 +1,27 @@
-#![recursion_limit="256"]
+#![recursion_limit = "256"]
 
 extern crate atty;
 extern crate bytesize;
-extern crate colored;
-extern crate env_logger;
-extern crate fnv;
-extern crate ignore;
-extern crate minilzo;
-extern crate nix;
-extern crate rmp_serde;
-extern crate serde;
-extern crate users;
-extern crate zip;
 #[macro_use]
 extern crate clap;
+extern crate colored;
+extern crate env_logger;
 #[macro_use]
 extern crate error_chain;
+extern crate fnv;
+extern crate ignore;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
+extern crate minilzo;
+extern crate nix;
+extern crate rmp_serde;
+extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+extern crate users;
+extern crate zip;
 
 mod errors;
 mod output;
@@ -82,9 +82,7 @@ fn add_dotexclude<U: Users>(mut wb: WalkBuilder, u: &U) -> Result<WalkBuilder> {
         }
         Ok(wb)
     } else {
-        Err(
-            format!("failed to locate UID {} in passwd", u.get_effective_uid()).into(),
-        )
+        Err(format!("failed to locate UID {} in passwd", u.get_effective_uid()).into())
     }
 }
 
@@ -93,7 +91,7 @@ impl App {
     fn walker(&self) -> Result<WalkBuilder> {
         let startdir = self.startdir()?;
         let mut ov = OverrideBuilder::new(&startdir);
-        for o in self.overrides.iter() {
+        for o in &self.overrides {
             let _ = ov.add(o)?;
         }
 
@@ -104,9 +102,9 @@ impl App {
             .ignore(false)
             .overrides(ov.build()?)
             .hidden(false);
-        for p in self.excludefrom.iter() {
+        for p in &self.excludefrom {
             if let Some(err) = wb.add_ignore(p) {
-                return Err(err).chain_err(|| format!("failed to load exclude file"));
+                return Err(err).chain_err(|| "failed to load exclude file".to_owned());
             }
         }
         if self.dotexclude {
@@ -126,9 +124,11 @@ impl App {
 
     fn gcroots(&self) -> Result<Box<Register>> {
         if self.register {
-            Ok(Box::new(
-                GCRoots::new(GC_PREFIX, self.startdir()?, &self.output)?,
-            ))
+            Ok(Box::new(GCRoots::new(
+                GC_PREFIX,
+                self.startdir()?,
+                &self.output,
+            )?))
         } else {
             Ok(Box::new(NullGCRoots::new(&self.output)))
         }
@@ -146,9 +146,9 @@ impl App {
     }
 
     fn startdir(&self) -> Result<PathBuf> {
-        self.startdir.canonicalize().chain_err(|| {
-            format!("start dir {} is not accessible", p2s(&self.startdir))
-        })
+        self.startdir
+            .canonicalize()
+            .chain_err(|| format!("start dir {} is not accessible", p2s(&self.startdir)))
     }
 
     /// The Metadata entry of the start directory.
@@ -161,8 +161,7 @@ impl App {
     /// Main entry point
     pub fn run(&self) -> Result<i32> {
         self.output.log_init();
-        match walk::spawn_threads(self, self.gcroots()?.deref_mut())?
-            .softerrors() {
+        match walk::spawn_threads(self, self.gcroots()?.deref_mut())?.softerrors() {
             0 => Ok(0),
             _ => Ok(1),
         }
@@ -207,17 +206,20 @@ impl<'a> From<ArgMatches<'a>> for App {
         }
 
         App {
-            startdir: a.value_of_os("DIRECTORY").unwrap_or(OsStr::new(".")).into(),
+            startdir: a.value_of_os("DIRECTORY")
+                .unwrap_or_else(|| OsStr::new("."))
+                .into(),
             quickcheck: ByteSize::kib(
                 a.value_of_lossy("quickcheck")
-                    .unwrap_or(Cow::from("0"))
+                    .unwrap_or_else(|| Cow::from("0"))
                     .parse::<usize>()
                     .unwrap(),
             ),
             output,
             register: !a.is_present("list") || a.is_present("register"),
             cachefile: a.value_of_os("cache").map(PathBuf::from),
-            cachelimit: a.value_of("cache-limit").map(|val| val.parse::<usize>().unwrap()),
+            cachelimit: a.value_of("cache-limit")
+                .map(|val| val.parse::<usize>().unwrap()),
             detailed_statistics: a.is_present("stats"),
             sleep_ms: a.value_of("stutter").map(|val| val.parse::<f32>().unwrap()),
             overrides,
@@ -247,17 +249,13 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
         if val < 1e3 {
             Ok(())
         } else {
-            Err(
-                "who wants to sleep longer than 1 second per file?".to_owned(),
-            )
+            Err("who wants to sleep longer than 1 second per file?".to_owned())
         }
     };
 
     clap::App::new(crate_name!())
         .version(crate_version!())
-        .author(
-            "© Flying Circus Internet Operations GmbH and contributors.",
-        )
+        .author("© Flying Circus Internet Operations GmbH and contributors.")
         .about(crate_description!())
         .usage(USAGE.as_str())
         .after_help(AFTER_HELP.as_str())
@@ -403,7 +401,7 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
                 "Scans inside ZIP archives for files matching GLOB.",
             ).long_help(
                 "Unpacks all files with matching GLOB as ZIP archives and scans inside. \
-                     Accepts a comma-separated list of glob patterns. [example: *.zip,*.egg]",
+                 Accepts a comma-separated list of glob patterns. [example: *.zip,*.egg]",
             )
                 .value_name("GLOB,...")
                 .takes_value(true)
@@ -421,7 +419,6 @@ fn main() {
         Ok(exitcode) => std::process::exit(exitcode),
     }
 }
-
 
 #[cfg(test)]
 pub mod test {

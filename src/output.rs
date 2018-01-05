@@ -1,6 +1,6 @@
 use atty::{self, Stream};
 use storepaths::StorePaths;
-use colored::{self, Colorize, ColoredString};
+use colored::{self, ColoredString, Colorize};
 use env_logger::LogBuilder;
 use errors::*;
 use log::{LogLevel, LogLevelFilter, LogRecord};
@@ -102,9 +102,8 @@ impl Output {
         }
         let w = io::stdout();
         let mut w = io::BufWriter::new(w.lock());
-        self.write_store_paths(&mut w, sp).chain_err(
-            || ErrorKind::WalkAbort,
-        )
+        self.write_store_paths(&mut w, sp)
+            .chain_err(|| ErrorKind::WalkAbort)
     }
 }
 
@@ -115,7 +114,7 @@ pub fn p2s<P: AsRef<Path>>(path: P) -> ColoredString {
 
 /// Duration to seconds
 ///
-/// Converts a time::Duration value into a floating-point seconds value.
+/// Converts a `time::Duration` value into a floating-point seconds value.
 pub fn d2s(d: Duration) -> f32 {
     d.as_secs() as f32 + (d.subsec_nanos() as f32) / 1e9
 }

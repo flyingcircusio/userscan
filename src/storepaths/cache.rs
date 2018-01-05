@@ -23,16 +23,18 @@ pub struct Cache {
 
 impl Cache {
     pub fn new(limit: Option<usize>) -> Self {
-        Cache { limit: limit.unwrap_or(0), .. Self::default() }
+        Cache {
+            limit: limit.unwrap_or(0),
+            ..Self::default()
+        }
     }
 
     pub fn open<P: AsRef<Path>>(mut self, path: P) -> Result<Self> {
         self.filename = path.as_ref().to_path_buf();
         info!("Loading cache {}", p2s(&self.filename));
         if let Some(p) = path.as_ref().parent() {
-            fs::create_dir_all(p).chain_err(|| {
-                format!("cache: failed to create leading directory {}", p2s(p))
-            })?;
+            fs::create_dir_all(p)
+                .chain_err(|| format!("cache: failed to create leading directory {}", p2s(p)))?;
         }
         let mut cachefile = open_locked(&path)?;
         if cachefile.metadata()?.len() > 0 {
@@ -114,15 +116,11 @@ impl Cache {
         let meta = sp.metadata()?;
         let mut map = self.map.write().expect("tainted lock");
         if self.limit > 0 && map.len() >= self.limit {
-            return Err(ErrorKind::CacheFull(self.limit).into())
+            return Err(ErrorKind::CacheFull(self.limit).into());
         }
         map.insert(
             sp.ino()?,
-            CacheLine::new(
-                meta.ctime(),
-                meta.ctime_nsec() as u8,
-                &sp.refs,
-            ),
+            CacheLine::new(meta.ctime(), meta.ctime_nsec() as u8, &sp.refs),
         );
         self.dirty.store(true, Ordering::Release);
         Ok(())
@@ -156,7 +154,6 @@ impl Cache {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     extern crate tempdir;
@@ -165,7 +162,7 @@ mod tests {
     use super::*;
     use self::tempdir::TempDir;
     use super::Lookup::*;
-    use tests::{FIXTURES, dent};
+    use tests::{dent, FIXTURES};
 
     fn sp_dummy() -> StorePaths {
         let dent = tests::dent("dir2/lftp");
@@ -184,20 +181,20 @@ mod tests {
             refs: vec![],
             cached: false,
             bytes_scanned: 0,
-            metadata: None
+            metadata: None,
         }
     }
 
     #[test]
     fn insert_cacheline() {
         let c = Cache::new(None);
-        c.insert(&mut sp_fixture("dir1/proto-http.la")).expect("insert failed");
+        c.insert(&mut sp_fixture("dir1/proto-http.la"))
+            .expect("insert failed");
 
         let dent = tests::dent("dir1/proto-http.la");
         let map = c.map.read().unwrap();
-        let entry = map.get(&dent.ino().unwrap()).expect(
-            "cache entry not found",
-        );
+        let entry = map.get(&dent.ino().unwrap())
+            .expect("cache entry not found");
         assert_eq!(
             entry.ctime,
             fs::metadata("dir1/proto-http.la").unwrap().ctime()
@@ -219,12 +216,10 @@ mod tests {
         c.insert(&mut sp_dummy()).expect("insert failed");
 
         match c.lookup(tests::dent("dir2/lftp")) {
-            Hit(sp) => {
-                assert_eq!(
-                    vec![PathBuf::from("q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24")],
-                    sp.refs
-                )
-            }
+            Hit(sp) => assert_eq!(
+                vec![PathBuf::from("q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24")],
+                sp.refs
+            ),
             _ => panic!("test failure: did not find dir2/lftp in cache"),
         }
 

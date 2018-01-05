@@ -3,7 +3,7 @@ use fnv::FnvHashMap;
 use minilzo;
 use nix::fcntl;
 use output::p2s;
-use rmp_serde::{encode, decode};
+use rmp_serde::{decode, encode};
 use std::fs;
 use std::io;
 use std::io::prelude::*;
@@ -16,8 +16,7 @@ pub struct CacheLine {
     pub ctime: i64,
     pub ctime_nsec: u8,
     pub refs: Vec<PathBuf>,
-    #[serde(skip)]
-    pub used: bool,
+    #[serde(skip)] pub used: bool,
 }
 
 impl PartialEq for CacheLine {
@@ -46,13 +45,12 @@ pub fn open_locked<P: AsRef<Path>>(path: P) -> Result<fs::File> {
         .truncate(false)
         .open(&path)
         .chain_err(|| format!("failed to open cache file {}", p2s(&path)))?;
-    fcntl::flock(f.as_raw_fd(), fcntl::FlockArg::LockExclusiveNonblock)
-        .chain_err(|| {
-            format!(
-                "failed to lock cache file {}: another instance running?",
-                p2s(&path)
-            )
-        })?;
+    fcntl::flock(f.as_raw_fd(), fcntl::FlockArg::LockExclusiveNonblock).chain_err(|| {
+        format!(
+            "failed to lock cache file {}: another instance running?",
+            p2s(&path)
+        )
+    })?;
     Ok(f)
 }
 
@@ -72,12 +70,12 @@ impl CacheMap {
     pub fn load<P: AsRef<Path>>(file: &mut fs::File, filename: P) -> Result<CacheMap> {
         let mut compr = Vec::new();
         file.seek(io::SeekFrom::Start(0))?;
-        file.read_to_end(&mut compr).chain_err(|| {
-            format!("error while reading {}", p2s(&filename))
-        })?;
+        file.read_to_end(&mut compr)
+            .chain_err(|| format!("error while reading {}", p2s(&filename)))?;
         match minilzo::decompress(&compr, compr.len() * 10)
             .map_err(|e| e.into())
-            .and_then(|data| decode::from_slice(&data).map_err(|e| Error::from(e))) {
+            .and_then(|data| decode::from_slice(&data).map_err(Error::from))
+        {
             Ok(cachemap) => Ok(cachemap),
             Err(err) => {
                 warn!(
@@ -112,7 +110,6 @@ impl DerefMut for CacheMap {
         &mut self.map
     }
 }
-
 
 #[cfg(test)]
 mod tests {
