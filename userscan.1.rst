@@ -54,6 +54,11 @@ OPTIONS
     Scans only files matching *GLOB*. Handy for restricting scans to a few types
     of files or to override broader exclude globs given before.
 
+**--cache-limit**, **-L**
+    Limits cache capacity to N inodes. fc-userscan will abort when trying to
+    save more than N entries in the cache. This will effectively cap memory and
+    disk usage.
+
 **--list**, **-l**
     Only prints found store references while scanning, but does not register
     them. Can be used in conjunctions with **--register**.

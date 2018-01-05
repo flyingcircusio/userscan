@@ -1,3 +1,7 @@
+2018-01-05  Christian Kauhaus <kc@flyingcircus.io>
+
+	* Mention `--cache-limit` option in man page.
+
 2017-11-21  Christian Kauhaus <kc@flyingcircus.io>
 
 	* Release 0.4.0
