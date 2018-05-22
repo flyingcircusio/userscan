@@ -1,7 +1,7 @@
 extern crate cpuprofiler;
 
-use super::*;
 use self::cpuprofiler::PROFILER;
+use super::*;
 
 #[test]
 fn profile() {

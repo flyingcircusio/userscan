@@ -1,5 +1,6 @@
 extern crate crossbeam;
 
+use super::App;
 use errors::*;
 use ignore::{self, DirEntry, WalkParallel, WalkState};
 use output::{fmt_error_chain, p2s};
@@ -12,7 +13,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 use storepaths::{Cache, Lookup};
-use super::App;
 
 #[derive(Clone, Debug)]
 struct ProcessingContext {
@@ -136,14 +136,14 @@ pub fn spawn_threads(app: &App, gcroots: &mut Register) -> Result<Statistics> {
 mod tests {
     extern crate tempdir;
 
-    use registry;
-    use ignore::WalkBuilder;
     use self::tempdir::TempDir;
+    use super::*;
+    use ignore::WalkBuilder;
+    use registry;
     use std::fs::{create_dir, set_permissions, File, Permissions};
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
-    use super::*;
     use tests::{app, assert_eq_vecs, fake_gc, FIXTURES};
     use users::mock::{MockUsers, User};
     use users::os::unix::UserExt;

@@ -16,7 +16,8 @@ pub struct CacheLine {
     pub ctime: i64,
     pub ctime_nsec: u8,
     pub refs: Vec<PathBuf>,
-    #[serde(skip)] pub used: bool,
+    #[serde(skip)]
+    pub used: bool,
 }
 
 impl PartialEq for CacheLine {
@@ -115,8 +116,8 @@ impl DerefMut for CacheMap {
 mod tests {
     extern crate tempdir;
     use self::tempdir::TempDir;
-    use tests::FIXTURES;
     use super::*;
+    use tests::FIXTURES;
 
     #[test]
     fn cacheline_should_compare_regardless_of_used_flag() {

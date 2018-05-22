@@ -29,16 +29,15 @@ mod registry;
 mod scan;
 mod statistics;
 mod storepaths;
-mod walk;
 #[cfg(test)]
 mod tests;
+mod walk;
 
-use storepaths::Cache;
 use bytesize::ByteSize;
 use clap::{Arg, ArgMatches};
 use errors::*;
-use ignore::overrides::OverrideBuilder;
 use ignore::WalkBuilder;
+use ignore::overrides::OverrideBuilder;
 use output::{Output, p2s};
 use registry::{GCRoots, NullGCRoots, Register};
 use statistics::Statistics;
@@ -48,6 +47,7 @@ use std::fs;
 use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::result;
+use storepaths::Cache;
 use users::Users;
 use users::cache::UsersCache;
 use users::os::unix::UserExt;
@@ -239,7 +239,8 @@ lazy_static! {
     static ref AFTER_HELP: String = format!(
         "Ignore globs are always loaded from ~/{} if it exists. For the format of all ignore \
          files refer to the gitignore(5) man page.",
-        DOTEXCLUDE);
+        DOTEXCLUDE
+    );
 }
 
 fn args<'a, 'b>() -> clap::App<'a, 'b> {

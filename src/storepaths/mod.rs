@@ -4,8 +4,8 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-mod cacheline;
 mod cache;
+mod cacheline;
 pub use self::cache::Cache;
 
 #[derive(Debug)]

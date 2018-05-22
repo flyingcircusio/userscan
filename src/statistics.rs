@@ -1,5 +1,5 @@
-use atty::{self, Stream};
 use ByteSize;
+use atty::{self, Stream};
 use colored::Colorize;
 use output::d2s;
 use std::collections::HashMap;

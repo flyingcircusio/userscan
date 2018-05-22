@@ -1,3 +1,5 @@
+use super::cacheline::*;
+use super::{Lookup, StorePaths};
 use colored::Colorize;
 use errors::*;
 use ignore::DirEntry;
@@ -5,10 +7,8 @@ use output::p2s;
 use std::fs;
 use std::os::unix::prelude::*;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::RwLock;
-use super::cacheline::*;
-use super::{Lookup, StorePaths};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[derive(Debug, Default)]
 pub struct Cache {
@@ -83,7 +83,7 @@ impl Cache {
         if let Some(ft) = dent.file_type() {
             if ft.is_dir() {
                 return Lookup::Dir(StorePaths {
-                    dent: dent,
+                    dent,
                     refs: vec![],
                     cached: true,
                     bytes_scanned: 0,
@@ -158,10 +158,10 @@ impl Cache {
 mod tests {
     extern crate tempdir;
 
-    use std::fs;
-    use super::*;
     use self::tempdir::TempDir;
     use super::Lookup::*;
+    use super::*;
+    use std::fs;
     use tests::{dent, FIXTURES};
 
     fn sp_dummy() -> StorePaths {

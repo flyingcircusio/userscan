@@ -1,5 +1,5 @@
+use super::STORE;
 use atty::{self, Stream};
-use storepaths::StorePaths;
 use colored::{self, ColoredString, Colorize};
 use env_logger::LogBuilder;
 use errors::*;
@@ -8,7 +8,7 @@ use std::io;
 use std::io::prelude::*;
 use std::path::Path;
 use std::time::Duration;
-use super::STORE;
+use storepaths::StorePaths;
 
 pub fn fmt_error_chain(err: &Error) -> String {
     err.iter()
@@ -50,14 +50,14 @@ impl Output {
                 (true, _) => LogLevelFilter::Info,
                 _ => LogLevelFilter::Warn,
             },
-            oneline: oneline,
             color: match color {
                 Some("always") => Some(true),
                 Some("never") => Some(false),
                 Some("auto") => Some(atty::is(Stream::Stdout) && atty::is(Stream::Stderr)),
                 _ => None,
             },
-            list: list,
+            oneline,
+            list,
         }
     }
 

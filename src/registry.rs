@@ -1,3 +1,4 @@
+use super::STORE;
 use colored::Colorize;
 use errors::*;
 use ignore::{self, DirEntry, WalkBuilder};
@@ -13,7 +14,6 @@ use std::path::{Path, PathBuf};
 use std::result;
 use std::sync::mpsc;
 use storepaths::StorePaths;
-use super::STORE;
 use users::get_effective_username;
 
 pub type GCRootsTx = mpsc::Sender<StorePaths>;
@@ -56,7 +56,7 @@ impl GCRoots {
         Ok(GCRoots {
             topdir: prefix.join(startdir.as_ref().strip_prefix("/")?),
             prefix,
-            cwd: cwd,
+            cwd,
             output: output.to_owned(),
             ..GCRoots::default()
         })

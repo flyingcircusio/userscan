@@ -2,12 +2,12 @@ extern crate memmap;
 extern crate regex;
 extern crate twoway;
 
-use errors::*;
-use ignore::{DirEntry, Match};
-use ignore::overrides::Override;
-use output::p2s;
 use self::memmap::{Mmap, Protection};
 use self::regex::bytes::Regex;
+use errors::*;
+use ignore::overrides::Override;
+use ignore::{DirEntry, Match};
+use output::p2s;
 use std::error::Error;
 use std::ffi::OsStr;
 use std::fs;
@@ -19,8 +19,8 @@ use zip::read::ZipArchive;
 use zip::result::ZipError;
 
 lazy_static! {
-    static ref STORE_RE: Regex = Regex::new(
-        r"(?-u)/nix/store/([0-9a-z]{32}-[0-9a-zA-Z+._?=-]+)").unwrap();
+    static ref STORE_RE: Regex =
+        Regex::new(r"(?-u)/nix/store/([0-9a-z]{32}-[0-9a-zA-Z+._?=-]+)").unwrap();
 }
 
 const MIN_STOREREF_LEN: u64 = 45;
@@ -199,9 +199,9 @@ impl Scanner {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use ignore::overrides::OverrideBuilder;
     use std::path::Path;
-    use super::*;
     use tests::{assert_eq_vecs, dent, FIXTURES};
 
     #[test]
