@@ -1,6 +1,6 @@
 [package]
 name = "fc-userscan"
-version = "0.4.1"
+version = "0.4.2-dev"
 authors = ["Christian Kauhaus <kc@flyingcircus.io>"]
 description = """\
 Scans files for Nix store references and registers them with the Nix garbage collector.
@@ -13,10 +13,12 @@ license = "BSD-3-Clause"
 [dependencies]
 atty = "0.2"
 bytesize = "0.2"
-clap = { version = "2", features = ["wrap_help"] }
+clap = {version = "2", features = ["wrap_help"]}
 colored = "1"
+cpuprofiler = {version = "*", optional = true}
 crossbeam = "0.3"
 env_logger = "0.5"
+error-chain = {version = "0.12", default-features = false}
 fnv = "1"
 ignore = "0.4"
 lazy_static = "1"
@@ -31,11 +33,6 @@ serde_derive = "1"
 twoway = "0.1"
 users = "0.7"
 zip = "0.4"
-cpuprofiler = {version = "*", optional = true}
-
-[dependencies.error-chain]
-version = "0.10"
-default-features = false
 
 [dev-dependencies]
 tempdir = "0.3"
@@ -43,5 +40,5 @@ tempdir = "0.3"
 [features]
 profile = ["cpuprofiler"]
 
-[profile.dev]
-codegen-units = 4
+[profile.release]
+lto = true
