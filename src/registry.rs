@@ -2,7 +2,7 @@ use super::STORE;
 use colored::Colorize;
 use errors::*;
 use ignore::{self, DirEntry, WalkBuilder};
-use output::{Output, p2s};
+use output::{p2s, Output};
 use std::collections::HashSet;
 use std::env;
 use std::ffi::OsStr;

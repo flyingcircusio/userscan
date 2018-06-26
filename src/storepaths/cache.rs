@@ -7,8 +7,8 @@ use output::p2s;
 use std::fs;
 use std::os::unix::prelude::*;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::RwLock;
 
 #[derive(Debug, Default)]
 pub struct Cache {

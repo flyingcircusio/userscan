@@ -2,7 +2,7 @@ extern crate memmap;
 extern crate regex;
 extern crate twoway;
 
-use self::memmap::{Mmap, Protection};
+use self::memmap::Mmap;
 use self::regex::bytes::Regex;
 use errors::*;
 use ignore::overrides::Override;
@@ -34,7 +34,7 @@ struct ScanResult {
 #[derive(Debug, Clone)]
 pub struct Scanner {
     /// Skips the rest of a file if there is no Nix store reference in the first QUICKCHECK bytes.
-    quickcheck: usize,
+    quickcheck: u64,
     /// Unzips files matched by the given globs and scans inside.
     unzip: Override,
 }
@@ -51,25 +51,24 @@ impl Default for Scanner {
 fn scan_regular_quickcheck(
     dent: &DirEntry,
     meta: fs::Metadata,
-    quickcheck: usize,
+    quickcheck: u64,
 ) -> Result<ScanResult> {
     debug!("scanning {}", dent.path().display());
-    let mmap = Mmap::open_path(dent.path(), Protection::Read)?;
-    let buf: &[u8] = unsafe { mmap.as_slice() };
-    let cutoff = quickcheck as u64;
-    if cutoff > 0 && meta.len() > cutoff
-        && twoway::find_bytes(&buf[0..quickcheck], b"/nix/store/").is_none()
+    let mmap = unsafe { Mmap::map(&fs::File::open(dent.path())?)? };
+    if quickcheck > 0
+        && meta.len() > quickcheck
+        && twoway::find_bytes(&mmap[0..(quickcheck as usize)], b"/nix/store/").is_none()
     {
         return Ok(ScanResult {
             refs: vec![],
             meta,
-            bytes_scanned: cutoff,
+            bytes_scanned: quickcheck,
         });
     }
     let bytes_scanned = meta.len();
     Ok(ScanResult {
         refs: STORE_RE
-            .captures_iter(buf)
+            .captures_iter(&mmap)
             .map(|cap| OsStr::from_bytes(&cap[1]).into())
             .collect(),
         meta,
@@ -77,7 +76,7 @@ fn scan_regular_quickcheck(
     })
 }
 
-fn scan_regular(dent: &DirEntry, quickcheck: usize) -> Result<ScanResult> {
+fn scan_regular(dent: &DirEntry, quickcheck: u64) -> Result<ScanResult> {
     let meta = dent.metadata()?;
     if meta.len() < MIN_STOREREF_LEN {
         // minimum length to fit a single store reference not reached
@@ -149,7 +148,7 @@ fn scan_symlink(dent: &DirEntry) -> Result<ScanResult> {
 }
 
 impl Scanner {
-    pub fn new(quickcheck: usize, unzip: Override) -> Self {
+    pub fn new(quickcheck: u64, unzip: Override) -> Self {
         Scanner { quickcheck, unzip }
     }
 

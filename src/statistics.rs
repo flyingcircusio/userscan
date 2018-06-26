@@ -1,4 +1,3 @@
-use ByteSize;
 use atty::{self, Stream};
 use colored::Colorize;
 use output::d2s;
@@ -9,6 +8,7 @@ use std::ops::{Add, AddAssign};
 use std::sync::mpsc;
 use std::time;
 use storepaths::StorePaths;
+use ByteSize;
 
 pub type StatsTx = mpsc::Sender<StatsMsg>;
 
@@ -134,7 +134,7 @@ impl Statistics {
             let p = format!(
                 "Scanning in progress... {} files ({} read) in {} s     ",
                 self.total.files,
-                ByteSize::b(self.total.bytes as usize),
+                ByteSize::b(self.total.bytes),
                 elapsed
             );
             eprint!("\r{}", p.purple());
@@ -176,7 +176,7 @@ impl Statistics {
                     "{:-10} {:6}  {}",
                     ext.to_string_lossy(),
                     files,
-                    ByteSize::b(bytes as usize)
+                    ByteSize::b(bytes)
                 );
             }
         }
@@ -188,7 +188,7 @@ impl Statistics {
         info!(
             "Processed {} files ({} read) in {:5.5}{}",
             self.total.files.to_string().cyan(),
-            ByteSize::b(self.total.bytes as usize),
+            ByteSize::b(self.total.bytes),
             d2s(elapsed).to_string().cyan(),
             " s".cyan()
         );

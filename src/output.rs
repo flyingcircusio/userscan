@@ -1,9 +1,9 @@
 use super::STORE;
 use atty::{self, Stream};
 use colored::{self, ColoredString, Colorize};
-use env_logger::LogBuilder;
+use env_logger::Builder;
 use errors::*;
-use log::{LogLevel, LogLevelFilter, LogRecord};
+use log::{Level, LevelFilter};
 use std::io;
 use std::io::prelude::*;
 use std::path::Path;
@@ -19,7 +19,7 @@ pub fn fmt_error_chain(err: &Error) -> String {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Output {
-    pub level: LogLevelFilter,
+    pub level: LevelFilter,
     pub oneline: bool,
     pub color: Option<bool>,
     pub list: bool,
@@ -28,7 +28,7 @@ pub struct Output {
 impl Default for Output {
     fn default() -> Self {
         Output {
-            level: LogLevelFilter::Off,
+            level: LevelFilter::Off,
             oneline: false,
             color: None,
             list: false,
@@ -46,9 +46,9 @@ impl Output {
     ) -> Output {
         Output {
             level: match (verbose, debug) {
-                (_, true) => LogLevelFilter::Debug,
-                (true, _) => LogLevelFilter::Info,
-                _ => LogLevelFilter::Warn,
+                (_, true) => LevelFilter::Debug,
+                (true, _) => LevelFilter::Info,
+                _ => LevelFilter::Warn,
             },
             color: match color {
                 Some("always") => Some(true),
@@ -65,17 +65,17 @@ impl Output {
         if let Some(v) = self.color {
             colored::control::set_override(v)
         }
-        let fmt = |r: &LogRecord| match r.level() {
-            LogLevel::Error => format!("{}: {}", r.level().to_string().red().bold(), r.args()),
-            LogLevel::Warn => format!("{}: {}", r.level().to_string().yellow(), r.args()),
-            LogLevel::Info => format!("{}", r.args()),
-            _ => format!("{}", r.args().to_string().blue()),
-        };
-        LogBuilder::new()
-            .format(fmt)
+        Builder::new()
+            .format(|buf, r| match r.level() {
+                Level::Error => {
+                    writeln!(buf, "{}: {}", r.level().to_string().red().bold(), r.args())
+                }
+                Level::Warn => writeln!(buf, "{}: {}", r.level().to_string().yellow(), r.args()),
+                Level::Info => writeln!(buf, "{}", r.args()),
+                _ => writeln!(buf, "{}", r.args().to_string().blue()),
+            })
             .filter(None, self.level)
-            .init()
-            .expect("log init may only be called once");
+            .init();
     }
 
     /// Outputs the name of a scanned file together with the store paths found inside.

@@ -36,9 +36,9 @@ mod walk;
 use bytesize::ByteSize;
 use clap::{Arg, ArgMatches};
 use errors::*;
-use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
-use output::{Output, p2s};
+use ignore::WalkBuilder;
+use output::{p2s, Output};
 use registry::{GCRoots, NullGCRoots, Register};
 use statistics::Statistics;
 use std::borrow::Cow;
@@ -48,9 +48,9 @@ use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::result;
 use storepaths::Cache;
-use users::Users;
 use users::cache::UsersCache;
 use users::os::unix::UserExt;
+use users::Users;
 
 static STORE: &str = "/nix/store/";
 static GC_PREFIX: &str = "/nix/var/nix/gcroots/profiles/per-user";
@@ -119,7 +119,7 @@ impl App {
         for glob in &self.unzip {
             ob.add(glob)?;
         }
-        Ok(scan::Scanner::new(self.quickcheck.as_usize(), ob.build()?))
+        Ok(scan::Scanner::new(self.quickcheck.as_u64(), ob.build()?))
     }
 
     fn gcroots(&self) -> Result<Box<Register>> {
@@ -212,7 +212,7 @@ impl<'a> From<ArgMatches<'a>> for App {
             quickcheck: ByteSize::kib(
                 a.value_of_lossy("quickcheck")
                     .unwrap_or_else(|| Cow::from("0"))
-                    .parse::<usize>()
+                    .parse::<u64>()
                     .unwrap(),
             ),
             output,
