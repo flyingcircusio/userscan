@@ -117,7 +117,7 @@ pub fn spawn_threads(app: &App, gcroots: &mut Register) -> Result<Statistics> {
         let walk_hdl = threads.spawn(move || pctx.walk(walker));
         threads.spawn(|| stats.receive_loop());
         gcroots.register_loop()?;
-        walk_hdl.join()
+        walk_hdl.join().expect("panic in subthread")
     })?;
     if app.register {
         gcroots.clean()?;

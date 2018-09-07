@@ -12,24 +12,24 @@ license = "BSD-3-Clause"
 
 [dependencies]
 atty = "0.2"
-bytesize = "0.2"
-clap = {version = "2", features = ["wrap_help"]}
-colored = "1"
+bytesize = "1.0"
+clap = {version = "2.30", features = ["wrap_help"]}
+colored = "1.6"
 cpuprofiler = {version = "*", optional = true}
-crossbeam = "0.3"
+crossbeam = "0.4"
 env_logger = "0.5"
 error-chain = {version = "0.12", default-features = false}
-fnv = "1"
+fnv = "1.0"
 ignore = "0.4"
-lazy_static = "1"
+lazy_static = "1.1"
 log = "0.4"
 memmap = "0.6"
 minilzo = "0.2"
 nix = "0.11"
 regex = "1"
 rmp-serde = "0.13"
-serde = "1"
-serde_derive = "1"
+serde = "1.0"
+serde_derive = "1.0"
 twoway = "0.1"
 users = "0.7"
 zip = "0.4"
@@ -39,6 +39,3 @@ tempdir = "0.3"
 
 [features]
 profile = ["cpuprofiler"]
-
-[profile.release]
-lto = true
