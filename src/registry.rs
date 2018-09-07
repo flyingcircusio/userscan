@@ -82,7 +82,8 @@ impl GCRoots {
     ///
     /// `target` is assumed to be without leading `/nix/store/` prefix.
     fn link<P: AsRef<Path>, T: AsRef<Path>>(&mut self, dir: P, target: T) -> Result<usize> {
-        let linkname = dir.as_ref()
+        let linkname = dir
+            .as_ref()
             .join(&OsStr::from_bytes(extract_hash(target.as_ref())));
         let target = Path::new(STORE).join(target);
         if self.seen.contains(&linkname) {
@@ -157,7 +158,8 @@ impl Register for GCRoots {
     fn register_loop(&mut self) -> Result<()> {
         match self.rx.take() {
             Some(rx) => {
-                self.registered = rx.iter()
+                self.registered = rx
+                    .iter()
                     .map(|sp| self.register(&sp))
                     .sum::<Result<usize>>()?;
                 Ok(())

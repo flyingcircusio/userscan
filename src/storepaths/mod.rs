@@ -54,7 +54,8 @@ impl StorePaths {
         match self.metadata {
             Some(ref m) => Ok(m.clone()),
             None => {
-                let m = self.dent
+                let m = self
+                    .dent
                     .metadata()
                     .chain_err(|| ErrorKind::DentNoMetadata(self.path().to_path_buf()))?;
                 self.metadata = Some(m.clone());

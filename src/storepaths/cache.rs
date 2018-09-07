@@ -167,7 +167,7 @@ mod tests {
     fn sp_dummy() -> StorePaths {
         let dent = tests::dent("dir2/lftp");
         StorePaths {
-            dent: dent,
+            dent,
             refs: vec![PathBuf::from("q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24")],
             cached: false,
             bytes_scanned: 0,
@@ -193,7 +193,8 @@ mod tests {
 
         let dent = tests::dent("dir1/proto-http.la");
         let map = c.map.read().unwrap();
-        let entry = map.get(&dent.ino().unwrap())
+        let entry = map
+            .get(&dent.ino().unwrap())
             .expect("cache entry not found");
         assert_eq!(
             entry.ctime,

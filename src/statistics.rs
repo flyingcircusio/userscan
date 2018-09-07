@@ -1,10 +1,11 @@
 use atty::{self, Stream};
 use colored::Colorize;
-use output::d2s;
+use output::{d2s, p2s};
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::hash::Hash;
 use std::ops::{Add, AddAssign};
+use std::path::Path;
 use std::sync::mpsc;
 use std::time;
 use storepaths::StorePaths;
@@ -72,7 +73,8 @@ fn map2vec<T>(map: &HashMap<T, Pair>, cutoff: usize) -> Vec<(usize, u64, T)>
 where
     T: Eq + Hash + Clone,
 {
-    let mut res = map.iter()
+    let mut res = map
+        .iter()
         .map(|e| {
             let (k, p): (&T, &Pair) = e;
             (p.files, p.bytes, k.clone())
@@ -183,7 +185,7 @@ impl Statistics {
         println!();
     }
 
-    pub fn log_summary(&self) {
+    pub fn log_summary<P: AsRef<Path>>(&self, startdir: P) {
         let elapsed = self.start.elapsed();
         info!(
             "Processed {} files ({} read) in {:5.5}{}",
@@ -195,8 +197,16 @@ impl Statistics {
         if self.detailed {
             self.print_details()
         }
+        let dir = p2s(startdir.as_ref());
         if self.softerrors > 0 {
-            warn!("{} soft error(s)", self.softerrors);
+            warn!(
+                "{}: Finished {} with {} soft error(s)",
+                crate_name!(),
+                dir,
+                self.softerrors
+            );
+        } else {
+            info!("{}: Finished {}", crate_name!(), dir);
         }
     }
 }

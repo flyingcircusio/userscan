@@ -206,7 +206,8 @@ impl<'a> From<ArgMatches<'a>> for App {
         }
 
         App {
-            startdir: a.value_of_os("DIRECTORY")
+            startdir: a
+                .value_of_os("DIRECTORY")
                 .unwrap_or_else(|| OsStr::new("."))
                 .into(),
             quickcheck: ByteSize::kib(
@@ -218,16 +219,19 @@ impl<'a> From<ArgMatches<'a>> for App {
             output,
             register: !a.is_present("list") || a.is_present("register"),
             cachefile: a.value_of_os("cache").map(PathBuf::from),
-            cachelimit: a.value_of("cache-limit")
+            cachelimit: a
+                .value_of("cache-limit")
                 .map(|val| val.parse::<usize>().unwrap()),
             detailed_statistics: a.is_present("stats"),
             sleep_ms: a.value_of("stutter").map(|val| val.parse::<f32>().unwrap()),
             overrides,
-            excludefrom: a.values_of_os("exclude-from")
+            excludefrom: a
+                .values_of_os("exclude-from")
                 .map(|vals| vals.map(PathBuf::from).collect())
                 .unwrap_or_default(),
             dotexclude: true,
-            unzip: a.values_of("unzip")
+            unzip: a
+                .values_of("unzip")
                 .map(|vals| vals.map(String::from).collect())
                 .unwrap_or_default(),
         }

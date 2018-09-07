@@ -1,3 +1,8 @@
+2018-09-07  Christian Kauhaus <kc@flyingcircus.io>
+
+	* Print summary and soft error count in one line to ease log parsing.
+	* Release 0.4.2
+
 2018-06-26  Christian Kauhaus <kc@flyingcircus.io>
 
 	* Update dependencies

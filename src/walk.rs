@@ -127,8 +127,7 @@ pub fn spawn_threads(app: &App, gcroots: &mut Register) -> Result<Statistics> {
             .commit()?;
         cache.log_statistics();
     }
-    stats.log_summary();
-    info!("{}: Finished {}", crate_name!(), p2s(&app.startdir));
+    stats.log_summary(&app.startdir);
     Ok(stats)
 }
 
@@ -271,7 +270,8 @@ mod tests {
             File::create(p.join(f)).unwrap();
         }
 
-        let walker = app.walker()
+        let walker = app
+            .walker()
             .and_then(|wb| ::add_dotexclude(wb, &users))
             .unwrap();
         assert_eq!(
