@@ -1,7 +1,12 @@
+// TODO structopt
+// TODO rewrite App struct
+// TODO failure
+// TODO --ignore-warnings option
 #![recursion_limit = "256"]
 
 extern crate atty;
 extern crate bytesize;
+extern crate chrono;
 #[macro_use]
 extern crate clap;
 extern crate colored;
@@ -20,6 +25,8 @@ extern crate rmp_serde;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+#[macro_use]
+extern crate structopt;
 extern crate users;
 extern crate zip;
 
@@ -48,6 +55,7 @@ use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::result;
 use storepaths::Cache;
+use structopt::StructOpt;
 use users::cache::UsersCache;
 use users::os::unix::UserExt;
 use users::Users;
@@ -55,6 +63,20 @@ use users::Users;
 static STORE: &str = "/nix/store/";
 static GC_PREFIX: &str = "/nix/var/nix/gcroots/profiles/per-user";
 static DOTEXCLUDE: &str = ".userscan-ignore";
+
+fn add_dotexclude<U: Users>(mut wb: WalkBuilder, u: &U) -> Result<WalkBuilder> {
+    if let Some(me) = u.get_user_by_uid(u.get_effective_uid()) {
+        let candidate = me.home_dir().join(DOTEXCLUDE);
+        if candidate.exists() {
+            if let Some(err) = wb.add_ignore(candidate) {
+                return Err(err.into());
+            }
+        }
+        Ok(wb)
+    } else {
+        Err(format!("failed to locate UID {} in passwd", u.get_effective_uid()).into())
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct App {
@@ -70,20 +92,6 @@ pub struct App {
     excludefrom: Vec<PathBuf>,
     dotexclude: bool,
     unzip: Vec<String>,
-}
-
-fn add_dotexclude<U: Users>(mut wb: WalkBuilder, u: &U) -> Result<WalkBuilder> {
-    if let Some(me) = u.get_user_by_uid(u.get_effective_uid()) {
-        let candidate = me.home_dir().join(DOTEXCLUDE);
-        if candidate.exists() {
-            if let Some(err) = wb.add_ignore(candidate) {
-                return Err(err.into());
-            }
-        }
-        Ok(wb)
-    } else {
-        Err(format!("failed to locate UID {} in passwd", u.get_effective_uid()).into())
-    }
 }
 
 impl App {
@@ -247,152 +255,147 @@ lazy_static! {
     );
 }
 
-fn args<'a, 'b>() -> clap::App<'a, 'b> {
-    let a = |short, long, help| Arg::with_name(long).short(short).long(long).help(help);
-    let validate_stutter = |s: String| -> result::Result<(), String> {
-        let val = s.parse::<f32>().map_err(|e| e.to_string())?;
-        if val < 1e3 {
-            Ok(())
-        } else {
-            Err("who wants to sleep longer than 1 second per file?".to_owned())
-        }
-    };
-
-    clap::App::new(crate_name!())
-        .version(crate_version!())
-        .author("© Flying Circus Internet Operations GmbH and contributors.")
-        .about(crate_description!())
-        .usage(USAGE.as_str())
-        .after_help(AFTER_HELP.as_str())
-        .arg(
-            Arg::with_name("DIRECTORY")
-                .help("Starts scan in DIRECTORY")
-                .required(true),
-        ).arg(
-            a(
-                "l",
-                "list",
-                "Only prints Nix store references while scanning (doesn't register)",
-            ).long_help(
-                "Prints Nix store references while scanning. GC roots are not registered when \
-                 this option is active. Specify -r/--register in addition to get both listing and \
-                 registration",
-            ).display_order(1),
-        ).arg(
-            a(
-                "r",
-                "register",
-                "Registers references even when in list mode",
-            ).long_help(
-                "Registers references even when in list mode. Registration is enabled by default \
-                 if -l/--list not given",
-            ).display_order(2),
-        ).arg(
-            a("c", "cache", "Keeps results between runs in FILE")
-                .value_name("FILE")
-                .long_help(
-                    "Caches scan results in FILE to avoid re-scanning unchanged files. \
-                     The cache is kept as a compressed messagepack file",
-                ).takes_value(true),
-        ).arg(
-            a("L", "cache-limit", "Limit cache to N entries")
-                .value_name("N")
-                .long_help(
-                    "Aborts program execution when trying to store more than N entries in the \
-                     cache. This helps to limit memory consumption",
-                ).takes_value(true)
-                .validator(|s: String| -> result::Result<(), String> {
-                    s.parse::<usize>().map(|_| ()).map_err(|e| e.to_string())
-                }),
-        ).arg(a(
-            "1",
-            "oneline",
-            "Prints each file with references on a single line",
-        )).arg(
-            a("C", "color", "Funky colorful output")
-                .value_name("WHEN")
-                .takes_value(true)
-                .possible_values(&["always", "never", "auto"])
-                .default_value("auto")
-                .long_help(
-                    "Turns on funky colorful output. If set to \"auto\", color is on if \
-                     run in a terminal",
-                ),
-        ).arg(
-            a(
-                "S",
-                "stats",
-                "Prints detailed statistics like scans per file type",
-            ).alias("statistics"),
-        ).arg(
-            a("s", "stutter", "Sleeps SLEEP ms after each file access")
-                .value_name("SLEEP")
-                .long_help(
-                    "Sleeps SLEEP milliseconds after each file to reduce I/O load. Files \
-                     loaded from the cache are not subject to stuttering",
-                ).takes_value(true)
-                .validator(validate_stutter),
-        ).arg(a("v", "verbose", "Additional output"))
-        .arg(
-            a(
-                "d",
-                "debug",
-                "Shows every file opened and lots of other stuff. Implies --verbose.",
-            ).display_order(1000),
-        ).arg(
-            a("q", "quickcheck", "Scans only the first SIZE kB of a file")
-                .takes_value(true)
-                .long_help(
-                    "Gives up if no Nix store references are found in the first SIZE kilobytes of \
+#[derive(StructOpt, Debug, Clone)]
+#[structopt(
+    author = "© Flying Circus Internet Operations GmbH and contributors.",
+    raw(usage = "USAGE.as_str()", after_help = "AFTER_HELP.as_str()")
+)]
+struct Opt {
+    /// Starts scan in DIRECTORY
+    #[structopt(
+        value_name = "DIRECTORY",
+        raw(required = "true"),
+        parse(from_os_str)
+    )]
+    startdir: PathBuf,
+    /// Only prints Nix store references while scanning (doesn't register)
+    #[structopt(
+        short = "l",
+        long = "list",
+        raw(display_order = "1"),
+        long_help = "Prints Nix store references while scanning. GC roots are not registered when \
+                     this option is active. Specify -r/--register in addition to get both listing \
+                     and registration"
+    )]
+    list: bool,
+    /// Registers references even when in list mode
+    #[structopt(
+        short = "r",
+        long = "register",
+        raw(display_order = "2"),
+        long_help = "Registers references even when in list mode. Registration is enabled by \
+                     default if -l/--list not given"
+    )]
+    register: bool,
+    /// Keeps results between runs in FILE
+    #[structopt(
+        short = "c",
+        long = "cache",
+        value_name = "FILE",
+        parse(from_os_str),
+        long_help = "Caches scan results in FILE to avoid re-scanning unchanged files. The cache \
+                     is kept as a compressed messagepack file"
+    )]
+    cache: Option<PathBuf>,
+    /// Limits cache to N entries
+    #[structopt(
+        short = "L",
+        long = "cache-limit",
+        value_name = "N",
+        long_help = "Aborts program execution when trying to store more than N entries in the \
+                     cache. This helps to limit memory consumption"
+    )]
+    cachelimit: Option<usize>,
+    /// Prints each file with references on a single line
+    #[structopt(short = "1", long = "oneline")]
+    oneline: bool,
+    /// Funky colorful output
+    #[structopt(
+        short = "C",
+        long = "color",
+        value_name = "WHEN",
+        default_value = "auto",
+        raw(
+            takes_value = "true",
+            possible_values = r#"&["always", "never", "auto"]"#
+        ),
+        long_help = r#"Enables colored output. If set to "auto", color is on if run in a terminal"#
+    )]
+    color: String,
+    /// Prints detailed statistics like scans per file type
+    #[structopt(short = "S", long = "stats", alias = "statistics")]
+    statistics: bool,
+    /// Sleeps SLEEP ms after each file access
+    #[structopt(
+        short = "s",
+        long = "stutter",
+        value_name = "SLEEP",
+        long_help = "Sleeps SLEEP milliseconds after each file to reduce I/O load. Files \
+                     loaded from the cache are not subject to stuttering"
+    )]
+    // XXX use chrono
+    // XXX validate 0 <= sleep < 1000
+    sleep_ms: Option<f32>,
+    /// Additional output
+    #[structopt(short = "v", long = "verbose")]
+    verbose: bool,
+    /// Shows every file opened and lots of other stuff (implies --verbose)
+    #[structopt(short = "d", long = "debug", raw(display_order = "100"))]
+    debug: bool,
+    /// Scans only the first SIZE kB of a file
+    #[structopt(
+        short = "q",
+        long = "quickcheck",
+        default_value = "512",
+        value_name = "SIZE",
+        long_help = "Gives up if no Nix store references are found in the first SIZE kilobytes of \
                      a file. Assumes that at least one Nix store reference is located near the \
-                     beginning. Speeds up scanning large files considerably",
-                ).value_name("SIZE")
-                .default_value("256")
-                .validator(|s: String| -> result::Result<(), String> {
-                    s.parse::<u32>().map(|_| ()).map_err(|e| e.to_string())
-                }),
-        ).arg(
-            a("e", "exclude", "Skips files matching GLOB")
-                .long_help("Skips files matching GLOB. May be given multiple times")
-                .value_name("GLOB")
-                .takes_value(true)
-                .multiple(true)
-                .number_of_values(1),
-        ).arg(
-            a("i", "include", "Scans only files matching GLOB")
-                .long_help(
-                    "Scans only files matching GLOB. May be given multiple times. Note \
+                     beginning. Speeds up scanning large files considerably"
+    )]
+    quickcheck_kb: u64, // XXX use ByteSize
+    /// Skips files matching GLOB
+    #[structopt(
+        short = "e",
+        long = "exclude",
+        value_name = "GLOB",
+        raw(number_of_values = "1"),
+        long_help = "Skips files matching GLOB. May be given multiple times"
+    )]
+    exclude: Vec<String>,
+    /// Scans only files matching GLOB
+    #[structopt(
+        short = "i",
+        long = "include",
+        value_name = "GLOB",
+        raw(number_of_values = "1"),
+        long_help = "Scans only files matching GLOB. may be given multiple times. note \
                      including individual files shows no effect if their containing directory is \
-                     matched by an exclude glob",
-                ).value_name("GLOB")
-                .takes_value(true)
-                .multiple(true)
-                .number_of_values(1),
-        ).arg(
-            a("E", "exclude-from", "Loads exclude globs from FILE")
-                .long_help(
-                    "Loads exclude globs from FILE, which is expected to be in .gitignore format. \
-                     May be given multiple times",
-                ).value_name("FILE")
-                .takes_value(true)
-                .multiple(true)
-                .number_of_values(1),
-        ).arg(
-            a(
-                "z",
-                "unzip",
-                "Scans inside ZIP archives for files matching GLOB.",
-            ).long_help(
-                "Unpacks all files with matching GLOB as ZIP archives and scans inside. \
-                 Accepts a comma-separated list of glob patterns [example: *.zip,*.egg]",
-            ).value_name("GLOB,...")
-            .takes_value(true)
-            .use_delimiter(true),
-        )
+                     matched by an exclude glob"
+    )]
+    include: Vec<String>,
+    /// Loads exclude globs from FILE
+    #[structopt(
+        short = "E",
+        long = "exclude",
+        value_name = "FILE",
+        raw(number_of_values = "1"),
+        parse(from_os_str),
+        long_help = "Loads exclude globs from FILE, which is expected to be in .gitignore format. \
+                     May be given multiple times"
+    )]
+    /// Scans inside ZIP archives for files matching GLOB
+    #[structopt(
+        short = "z",
+        long = "unzip",
+        raw(use_delimiter = "true"),
+        long_help = "Unpacks all files with matching GLOB as ZIP archives and scans inside. \
+                     Accepts a comma-separated list of glob patterns [example: *.zip,*.egg]"
+    )]
+    excludefrom: Vec<PathBuf>,
 }
 
 fn main() {
-    let app = App::from(args().get_matches());
+    let app = App::from(Opt::from_args());
     match app.run() {
         Err(ref err) => {
             error!("{}", output::fmt_error_chain(err));

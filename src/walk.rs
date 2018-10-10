@@ -7,7 +7,7 @@ use output::{fmt_error_chain, p2s};
 use registry::{GCRootsTx, Register};
 use scan::Scanner;
 use statistics::{Statistics, StatsMsg, StatsTx};
-use std::os::linux::fs::MetadataExt;
+use std::os::unix::fs::MetadataExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -28,7 +28,7 @@ struct ProcessingContext {
 impl ProcessingContext {
     fn create(app: &App, stats: &mut Statistics, gcroots: &mut Register) -> Result<Self> {
         Ok(Self {
-            startdev: app.start_meta()?.st_dev(),
+            startdev: app.start_meta()?.dev(),
             sleep: app.sleep_ms.map(|val| Duration::new(0, (val * 1e6) as u32)),
             cache: Arc::new(app.cache()?),
             scanner: Arc::new(app.scanner()?),
@@ -58,7 +58,7 @@ impl ProcessingContext {
                 .send(StatsMsg::SoftError)
                 .chain_err(|| ErrorKind::WalkAbort)?;
         }
-        if sp.metadata()?.st_dev() != self.startdev {
+        if sp.metadata()?.dev() != self.startdev {
             return Ok(WalkState::Skip);
         }
         self.cache
@@ -158,9 +158,10 @@ mod tests {
     /// Hard errors lead to a panic, partial errors are silently ignored.
     pub fn walk2vec(wb: &WalkBuilder, prefix: &Path) -> Vec<PathBuf> {
         let mut paths = vec![];
+        let prefix = prefix.canonicalize().unwrap();
         for r in wb.build() {
             if let Ok(dent) = r {
-                let p = dent.path().strip_prefix(prefix).unwrap();
+                let p = dent.path().strip_prefix(&prefix).unwrap();
                 paths.push(p.to_owned());
             }
         }
