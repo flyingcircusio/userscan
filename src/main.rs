@@ -268,8 +268,7 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
             Arg::with_name("DIRECTORY")
                 .help("Starts scan in DIRECTORY")
                 .required(true),
-        )
-        .arg(
+        ).arg(
             a(
                 "l",
                 "list",
@@ -277,48 +276,39 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
             ).long_help(
                 "Prints Nix store references while scanning. GC roots are not registered when \
                  this option is active. Specify -r/--register in addition to get both listing and \
-                 registration.",
-            )
-                .display_order(1),
-        )
-        .arg(
+                 registration",
+            ).display_order(1),
+        ).arg(
             a(
                 "r",
                 "register",
                 "Registers references even when in list mode",
             ).long_help(
                 "Registers references even when in list mode. Registration is enabled by default \
-                 if -l/--list not given.",
-            )
-                .display_order(2),
-        )
-        .arg(
+                 if -l/--list not given",
+            ).display_order(2),
+        ).arg(
             a("c", "cache", "Keeps results between runs in FILE")
                 .value_name("FILE")
                 .long_help(
                     "Caches scan results in FILE to avoid re-scanning unchanged files. \
-                     The cache is kept as a compressed messagepack file.",
-                )
-                .takes_value(true),
-        )
-        .arg(
+                     The cache is kept as a compressed messagepack file",
+                ).takes_value(true),
+        ).arg(
             a("L", "cache-limit", "Limit cache to N entries")
                 .value_name("N")
                 .long_help(
                     "Aborts program execution when trying to store more than N entries in the \
-                     cache. This helps to limit memory consumption.",
-                )
-                .takes_value(true)
+                     cache. This helps to limit memory consumption",
+                ).takes_value(true)
                 .validator(|s: String| -> result::Result<(), String> {
                     s.parse::<usize>().map(|_| ()).map_err(|e| e.to_string())
                 }),
-        )
-        .arg(a(
+        ).arg(a(
             "1",
             "oneline",
             "Prints each file with references on a single line",
-        ))
-        .arg(
+        )).arg(
             a("C", "color", "Funky colorful output")
                 .value_name("WHEN")
                 .takes_value(true)
@@ -326,91 +316,78 @@ fn args<'a, 'b>() -> clap::App<'a, 'b> {
                 .default_value("auto")
                 .long_help(
                     "Turns on funky colorful output. If set to \"auto\", color is on if \
-                     run in a terminal.",
+                     run in a terminal",
                 ),
-        )
-        .arg(
+        ).arg(
             a(
                 "S",
                 "stats",
                 "Prints detailed statistics like scans per file type",
             ).alias("statistics"),
-        )
-        .arg(
+        ).arg(
             a("s", "stutter", "Sleeps SLEEP ms after each file access")
                 .value_name("SLEEP")
                 .long_help(
                     "Sleeps SLEEP milliseconds after each file to reduce I/O load. Files \
-                     loaded from the cache are not subject to stuttering.",
-                )
-                .takes_value(true)
+                     loaded from the cache are not subject to stuttering",
+                ).takes_value(true)
                 .validator(validate_stutter),
-        )
-        .arg(a("v", "verbose", "Additional output"))
+        ).arg(a("v", "verbose", "Additional output"))
         .arg(
             a(
                 "d",
                 "debug",
                 "Shows every file opened and lots of other stuff. Implies --verbose.",
             ).display_order(1000),
-        )
-        .arg(
+        ).arg(
             a("q", "quickcheck", "Scans only the first SIZE kB of a file")
                 .takes_value(true)
                 .long_help(
                     "Gives up if no Nix store references are found in the first SIZE kilobytes of \
                      a file. Assumes that at least one Nix store reference is located near the \
-                     beginning. Speeds up scanning large files considerably.",
-                )
-                .value_name("SIZE")
+                     beginning. Speeds up scanning large files considerably",
+                ).value_name("SIZE")
                 .default_value("256")
                 .validator(|s: String| -> result::Result<(), String> {
                     s.parse::<u32>().map(|_| ()).map_err(|e| e.to_string())
                 }),
-        )
-        .arg(
+        ).arg(
             a("e", "exclude", "Skips files matching GLOB")
-                .long_help("Skips files matching GLOB. May be given multiple times.")
+                .long_help("Skips files matching GLOB. May be given multiple times")
                 .value_name("GLOB")
                 .takes_value(true)
                 .multiple(true)
                 .number_of_values(1),
-        )
-        .arg(
+        ).arg(
             a("i", "include", "Scans only files matching GLOB")
                 .long_help(
                     "Scans only files matching GLOB. May be given multiple times. Note \
                      including individual files shows no effect if their containing directory is \
-                     matched by an exclude glob.",
-                )
-                .value_name("GLOB")
+                     matched by an exclude glob",
+                ).value_name("GLOB")
                 .takes_value(true)
                 .multiple(true)
                 .number_of_values(1),
-        )
-        .arg(
+        ).arg(
             a("E", "exclude-from", "Loads exclude globs from FILE")
                 .long_help(
                     "Loads exclude globs from FILE, which is expected to be in .gitignore format. \
-                     May be given multiple times.",
-                )
-                .value_name("FILE")
+                     May be given multiple times",
+                ).value_name("FILE")
                 .takes_value(true)
                 .multiple(true)
                 .number_of_values(1),
-        )
-        .arg(
+        ).arg(
             a(
                 "z",
                 "unzip",
                 "Scans inside ZIP archives for files matching GLOB.",
             ).long_help(
                 "Unpacks all files with matching GLOB as ZIP archives and scans inside. \
-                 Accepts a comma-separated list of glob patterns. [example: *.zip,*.egg]",
-            )
-                .value_name("GLOB,...")
-                .takes_value(true)
-                .use_delimiter(true),
+                 Accepts a comma-separated list of glob patterns [example: *.zip,*.egg]",
+            ).value_name("GLOB,...")
+            .takes_value(true)
+            .use_delimiter(true),
         )
 }
 

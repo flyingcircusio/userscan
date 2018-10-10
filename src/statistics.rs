@@ -78,8 +78,7 @@ where
         .map(|e| {
             let (k, p): (&T, &Pair) = e;
             (p.files, p.bytes, k.clone())
-        })
-        .collect::<Vec<(usize, u64, T)>>();
+        }).collect::<Vec<(usize, u64, T)>>();
     res.sort_by(|a, b| a.0.cmp(&b.0).reverse());
     res.truncate(cutoff);
     res

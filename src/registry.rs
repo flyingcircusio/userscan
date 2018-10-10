@@ -71,7 +71,8 @@ impl GCRoots {
 
     fn create_link(&mut self, dir: &Path, linkname: PathBuf, target: &Path) -> Result<usize> {
         info!("creating link {}", p2s(&linkname));
-        fs::create_dir_all(dir).chain_err(|| format!("failed to create GC dir {}", dir.display()))?;
+        fs::create_dir_all(dir)
+            .chain_err(|| format!("failed to create GC dir {}", dir.display()))?;
         unix::fs::symlink(target, &linkname)
             .chain_err(|| format!("failed to create symlink {}", linkname.display()))?;
         self.seen.insert(linkname);
@@ -149,8 +150,7 @@ impl GCRoots {
                     }
                     _ => Ok(0),
                 }
-            })
-            .sum()
+            }).sum()
     }
 }
 

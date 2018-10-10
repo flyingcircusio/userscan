@@ -155,7 +155,6 @@ mod tests {
     }
 
     /// Walks whatever a given WalkBuilder builds and collects path relative to the fixtures dir.
-    ///
     /// Hard errors lead to a panic, partial errors are silently ignored.
     pub fn walk2vec(wb: &WalkBuilder, prefix: &Path) -> Vec<PathBuf> {
         let mut paths = vec![];
@@ -249,8 +248,8 @@ mod tests {
                 "dir2/link",
                 "miniegg-1-py3.5.egg",
             ].into_iter()
-                .map(PathBuf::from)
-                .collect::<Vec<_>>(),
+            .map(PathBuf::from)
+            .collect::<Vec<_>>(),
             walk2vec(&app.walker().unwrap(), &*FIXTURES)
         );
     }

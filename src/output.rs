@@ -73,8 +73,7 @@ impl Output {
                 Level::Warn => writeln!(buf, "{}: {}", r.level().to_string().yellow(), r.args()),
                 Level::Info => writeln!(buf, "{}", r.args()),
                 _ => writeln!(buf, "{}", r.args().to_string().blue()),
-            })
-            .filter(None, self.level)
+            }).filter(None, self.level)
             .init();
     }
 
