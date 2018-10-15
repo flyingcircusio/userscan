@@ -1,4 +1,4 @@
-use super::STORE;
+use super::{Opt, STORE};
 use atty::{self, Stream};
 use colored::{self, ColoredString, Colorize};
 use env_logger::Builder;
@@ -21,7 +21,7 @@ pub fn fmt_error_chain(err: &Error) -> String {
 pub struct Output {
     pub level: LevelFilter,
     pub oneline: bool,
-    pub color: Option<bool>,
+    pub color: bool,
     pub list: bool,
 }
 
@@ -30,20 +30,14 @@ impl Default for Output {
         Output {
             level: LevelFilter::Off,
             oneline: false,
-            color: None,
+            color: false,
             list: false,
         }
     }
 }
 
 impl Output {
-    pub fn new(
-        verbose: bool,
-        debug: bool,
-        oneline: bool,
-        color: Option<&str>,
-        list: bool,
-    ) -> Output {
+    pub fn new(verbose: bool, debug: bool, oneline: bool, color: &str, list: bool) -> Output {
         Output {
             level: match (verbose, debug) {
                 (_, true) => LevelFilter::Debug,
@@ -51,10 +45,9 @@ impl Output {
                 _ => LevelFilter::Warn,
             },
             color: match color {
-                Some("always") => Some(true),
-                Some("never") => Some(false),
-                Some("auto") => Some(atty::is(Stream::Stdout) && atty::is(Stream::Stderr)),
-                _ => None,
+                "always" => true,
+                "never" => false,
+                _ => atty::is(Stream::Stdout) && atty::is(Stream::Stderr),
             },
             oneline,
             list,
@@ -62,9 +55,7 @@ impl Output {
     }
 
     pub fn log_init(&self) {
-        if let Some(v) = self.color {
-            colored::control::set_override(v)
-        }
+        colored::control::set_override(self.color);
         Builder::new()
             .format(|buf, r| match r.level() {
                 Level::Error => {
@@ -106,6 +97,12 @@ impl Output {
     }
 }
 
+impl<'a> From<&'a Opt> for Output {
+    fn from(opt: &'a Opt) -> Self {
+        Output::new(opt.verbose, opt.debug, opt.oneline, &opt.color, opt.list)
+    }
+}
+
 /// Path to String with coloring
 pub fn p2s<P: AsRef<Path>>(path: P) -> ColoredString {
     path.as_ref().display().to_string().green()
@@ -116,4 +113,18 @@ pub fn p2s<P: AsRef<Path>>(path: P) -> ColoredString {
 /// Converts a `time::Duration` value into a floating-point seconds value.
 pub fn d2s(d: Duration) -> f32 {
     d.as_secs() as f32 + (d.subsec_nanos() as f32) / 1e9
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn color_default_argument() {
+        let o = Output::new(false, false, false, "never", false);
+        assert!(!o.color);
+
+        let o = Output::new(false, false, false, "always", false);
+        assert!(o.color);
+    }
 }

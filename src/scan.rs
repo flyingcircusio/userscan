@@ -4,6 +4,7 @@ extern crate twoway;
 
 use self::memmap::Mmap;
 use self::regex::bytes::Regex;
+use bytesize::ByteSize;
 use errors::*;
 use ignore::overrides::Override;
 use ignore::{DirEntry, Match};
@@ -34,7 +35,7 @@ struct ScanResult {
 #[derive(Debug, Clone)]
 pub struct Scanner {
     /// Skips the rest of a file if there is no Nix store reference in the first QUICKCHECK bytes.
-    quickcheck: u64,
+    quickcheck: ByteSize,
     /// Unzips files matched by the given globs and scans inside.
     unzip: Override,
 }
@@ -42,7 +43,7 @@ pub struct Scanner {
 impl Default for Scanner {
     fn default() -> Self {
         Scanner {
-            quickcheck: 0,
+            quickcheck: ByteSize::b(0),
             unzip: Override::empty(),
         }
     }
@@ -76,7 +77,7 @@ fn scan_regular_quickcheck(
     })
 }
 
-fn scan_regular(dent: &DirEntry, quickcheck: u64) -> Result<ScanResult> {
+fn scan_regular(dent: &DirEntry, quickcheck: ByteSize) -> Result<ScanResult> {
     let meta = dent.metadata()?;
     if meta.len() < MIN_STOREREF_LEN {
         // minimum length to fit a single store reference not reached
@@ -87,7 +88,7 @@ fn scan_regular(dent: &DirEntry, quickcheck: u64) -> Result<ScanResult> {
             bytes_scanned,
         })
     } else {
-        scan_regular_quickcheck(dent, meta, quickcheck)
+        scan_regular_quickcheck(dent, meta, quickcheck.as_u64())
     }
 }
 
@@ -148,7 +149,7 @@ fn scan_symlink(dent: &DirEntry) -> Result<ScanResult> {
 }
 
 impl Scanner {
-    pub fn new(quickcheck: u64, unzip: Override) -> Self {
+    pub fn new(quickcheck: ByteSize, unzip: Override) -> Self {
         Scanner { quickcheck, unzip }
     }
 
@@ -215,7 +216,7 @@ mod tests {
             |path| path.to_string_lossy().into_owned(),
             &["q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24"],
         );
-        scanner.quickcheck = 4096;
+        scanner.quickcheck = ByteSize::kib(4);
         assert_eq_vecs(
             scanner
                 .find_paths(dent("dir2/lftp.offset"))
@@ -239,7 +240,7 @@ mod tests {
             .unwrap()
             .build()
             .unwrap();
-        let sp = Scanner::new(0, unzip)
+        let sp = Scanner::new(ByteSize::default(), unzip)
             .find_paths(dent("miniegg-1-py3.5.egg"))
             .unwrap();
         assert_eq!(
@@ -256,7 +257,7 @@ mod tests {
             .unwrap()
             .build()
             .unwrap();
-        let sp = Scanner::new(0, unzip)
+        let sp = Scanner::new(ByteSize::default(), unzip)
             .find_paths(dent("dir2/lftp"))
             .expect("mask ZIP error");
         assert_eq!(

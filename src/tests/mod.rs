@@ -20,7 +20,7 @@ lazy_static! {
 pub fn app<P: AsRef<Path>>(startdir: P) -> App {
     chdir(&*FIXTURES).expect("chdir(fixtures) failed");
     let mut a = App::default();
-    a.startdir = PathBuf::from(startdir.as_ref());
+    a.opt.startdir = PathBuf::from(startdir.as_ref());
     a
 }
 

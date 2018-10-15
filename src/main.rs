@@ -1,5 +1,3 @@
-// TODO structopt
-// TODO rewrite App struct
 // TODO failure
 // TODO --ignore-warnings option
 #![recursion_limit = "256"]
@@ -41,30 +39,25 @@ mod tests;
 mod walk;
 
 use bytesize::ByteSize;
-use clap::{Arg, ArgMatches};
 use errors::*;
 use ignore::overrides::OverrideBuilder;
 use ignore::WalkBuilder;
 use output::{p2s, Output};
 use registry::{GCRoots, NullGCRoots, Register};
 use statistics::Statistics;
-use std::borrow::Cow;
-use std::ffi::OsStr;
 use std::fs;
 use std::ops::DerefMut;
 use std::path::PathBuf;
-use std::result;
+use std::time::Duration;
 use storepaths::Cache;
 use structopt::StructOpt;
-use users::cache::UsersCache;
 use users::os::unix::UserExt;
-use users::Users;
 
 static STORE: &str = "/nix/store/";
 static GC_PREFIX: &str = "/nix/var/nix/gcroots/profiles/per-user";
 static DOTEXCLUDE: &str = ".userscan-ignore";
 
-fn add_dotexclude<U: Users>(mut wb: WalkBuilder, u: &U) -> Result<WalkBuilder> {
+fn add_dotexclude<U: users::Users>(mut wb: WalkBuilder, u: &U) -> Result<WalkBuilder> {
     if let Some(me) = u.get_user_by_uid(u.get_effective_uid()) {
         let candidate = me.home_dir().join(DOTEXCLUDE);
         if candidate.exists() {
@@ -78,20 +71,12 @@ fn add_dotexclude<U: Users>(mut wb: WalkBuilder, u: &U) -> Result<WalkBuilder> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct App {
-    cachefile: Option<PathBuf>,
-    cachelimit: Option<usize>,
-    detailed_statistics: bool,
+    opt: Opt,
     output: Output,
     overrides: Vec<String>,
-    quickcheck: ByteSize,
     register: bool,
-    sleep_ms: Option<f32>,
-    startdir: PathBuf,
-    excludefrom: Vec<PathBuf>,
-    dotexclude: bool,
-    unzip: Vec<String>,
 }
 
 impl App {
@@ -110,28 +95,24 @@ impl App {
             .ignore(false)
             .overrides(ov.build()?)
             .hidden(false);
-        for p in &self.excludefrom {
+        for p in &self.opt.excludefrom {
             if let Some(err) = wb.add_ignore(p) {
                 return Err(err).chain_err(|| "failed to load exclude file".to_owned());
             }
         }
-        if self.dotexclude {
-            add_dotexclude(wb, &UsersCache::new())
-        } else {
-            Ok(wb)
-        }
+        add_dotexclude(wb, &users::cache::UsersCache::new())
     }
 
     fn scanner(&self) -> Result<scan::Scanner> {
-        let mut ob = OverrideBuilder::new(&self.startdir);
-        for glob in &self.unzip {
+        let mut ob = OverrideBuilder::new(&self.opt.startdir);
+        for glob in &self.opt.unzip {
             ob.add(glob)?;
         }
-        Ok(scan::Scanner::new(self.quickcheck.as_u64(), ob.build()?))
+        Ok(scan::Scanner::new(self.opt.quickcheck, ob.build()?))
     }
 
     fn gcroots(&self) -> Result<Box<Register>> {
-        if self.register {
+        if self.opt.register {
             Ok(Box::new(GCRoots::new(
                 GC_PREFIX,
                 self.startdir()?,
@@ -143,20 +124,24 @@ impl App {
     }
 
     fn cache(&self) -> Result<Cache> {
-        match self.cachefile {
-            Some(ref f) => Cache::new(self.cachelimit).open(f),
-            None => Ok(Cache::new(self.cachelimit)),
+        match self.opt.cache {
+            Some(ref f) => Cache::new(self.opt.cachelimit).open(f),
+            None => Ok(Cache::new(self.opt.cachelimit)),
         }
     }
 
     fn statistics(&self) -> Statistics {
-        Statistics::new(self.detailed_statistics, self.output.list)
+        Statistics::new(self.opt.statistics, self.output.list)
     }
 
+    /// Normalized directory where scanning starts.
+    ///
+    /// Don't use this for user messages, they should print out `self.opt.startdir` instead.
     fn startdir(&self) -> Result<PathBuf> {
-        self.startdir
+        self.opt
+            .startdir
             .canonicalize()
-            .chain_err(|| format!("start dir {} is not accessible", p2s(&self.startdir)))
+            .chain_err(|| format!("start dir {} is not accessible", p2s(&self.opt.startdir)))
     }
 
     /// The Metadata entry of the start directory.
@@ -176,72 +161,19 @@ impl App {
     }
 }
 
-impl Default for App {
-    fn default() -> Self {
-        App {
-            startdir: PathBuf::new(),
-            quickcheck: ByteSize::b(0),
-            register: false,
-            output: Output::default(),
-            cachefile: None,
-            cachelimit: None,
-            detailed_statistics: false,
-            sleep_ms: None,
-            overrides: vec![],
-            excludefrom: vec![],
-            dotexclude: true,
-            unzip: vec![],
-        }
-    }
-}
-
-impl<'a> From<ArgMatches<'a>> for App {
-    fn from(a: ArgMatches) -> Self {
-        let output = Output::new(
-            a.is_present("verbose"),
-            a.is_present("debug"),
-            a.is_present("oneline"),
-            a.value_of("color"),
-            a.is_present("list"),
-        );
-
-        let mut overrides: Vec<String> = vec![];
-        if let Some(excl) = a.values_of("exclude") {
-            overrides.extend(excl.map(|e| format!("!{}", e)))
-        }
-        if let Some(incl) = a.values_of("include") {
-            overrides.extend(incl.map(|i| i.to_owned()))
-        }
+impl From<Opt> for App {
+    fn from(opt: Opt) -> Self {
+        let output = Output::from(&opt);
+        let mut overrides = vec![];
+        overrides.extend(opt.exclude.iter().map(|e| format!("!{}", e)));
+        overrides.extend(opt.include.iter().map(|i| i.to_owned()));
+        let register = opt.register || !opt.list;
 
         App {
-            startdir: a
-                .value_of_os("DIRECTORY")
-                .unwrap_or_else(|| OsStr::new("."))
-                .into(),
-            quickcheck: ByteSize::kib(
-                a.value_of_lossy("quickcheck")
-                    .unwrap_or_else(|| Cow::from("0"))
-                    .parse::<u64>()
-                    .unwrap(),
-            ),
+            opt,
             output,
-            register: !a.is_present("list") || a.is_present("register"),
-            cachefile: a.value_of_os("cache").map(PathBuf::from),
-            cachelimit: a
-                .value_of("cache-limit")
-                .map(|val| val.parse::<usize>().unwrap()),
-            detailed_statistics: a.is_present("stats"),
-            sleep_ms: a.value_of("stutter").map(|val| val.parse::<f32>().unwrap()),
             overrides,
-            excludefrom: a
-                .values_of_os("exclude-from")
-                .map(|vals| vals.map(PathBuf::from).collect())
-                .unwrap_or_default(),
-            dotexclude: true,
-            unzip: a
-                .values_of("unzip")
-                .map(|vals| vals.map(String::from).collect())
-                .unwrap_or_default(),
+            register,
         }
     }
 }
@@ -255,7 +187,21 @@ lazy_static! {
     );
 }
 
-#[derive(StructOpt, Debug, Clone)]
+fn parse_kb(arg: &str) -> Result<ByteSize> {
+    let n = arg.parse()?;
+    Ok(ByteSize::kib(n))
+}
+
+fn parse_sleep(arg: &str) -> Result<Duration> {
+    let s: f32 = arg.parse()?;
+    if s < 0.0 || s >= 1000.0 {
+        Err(ErrorKind::SleepOutOfBounds(s).into())
+    } else {
+        Ok(Duration::from_micros((s * 1e3) as u64))
+    }
+}
+
+#[derive(StructOpt, Debug, Clone, Default)]
 #[structopt(
     author = "© Flying Circus Internet Operations GmbH and contributors.",
     raw(usage = "USAGE.as_str()", after_help = "AFTER_HELP.as_str()")
@@ -330,12 +276,11 @@ struct Opt {
         short = "s",
         long = "stutter",
         value_name = "SLEEP",
+        parse(try_from_str = "parse_sleep"),
         long_help = "Sleeps SLEEP milliseconds after each file to reduce I/O load. Files \
                      loaded from the cache are not subject to stuttering"
     )]
-    // XXX use chrono
-    // XXX validate 0 <= sleep < 1000
-    sleep_ms: Option<f32>,
+    sleep: Option<Duration>,
     /// Additional output
     #[structopt(short = "v", long = "verbose")]
     verbose: bool,
@@ -348,11 +293,12 @@ struct Opt {
         long = "quickcheck",
         default_value = "512",
         value_name = "SIZE",
+        parse(try_from_str = "parse_kb"),
         long_help = "Gives up if no Nix store references are found in the first SIZE kilobytes of \
                      a file. Assumes that at least one Nix store reference is located near the \
                      beginning. Speeds up scanning large files considerably"
     )]
-    quickcheck_kb: u64, // XXX use ByteSize
+    quickcheck: ByteSize,
     /// Skips files matching GLOB
     #[structopt(
         short = "e",
@@ -376,13 +322,14 @@ struct Opt {
     /// Loads exclude globs from FILE
     #[structopt(
         short = "E",
-        long = "exclude",
+        long = "excludefrom",
         value_name = "FILE",
         raw(number_of_values = "1"),
         parse(from_os_str),
         long_help = "Loads exclude globs from FILE, which is expected to be in .gitignore format. \
                      May be given multiple times"
     )]
+    excludefrom: Vec<PathBuf>,
     /// Scans inside ZIP archives for files matching GLOB
     #[structopt(
         short = "z",
@@ -391,7 +338,7 @@ struct Opt {
         long_help = "Unpacks all files with matching GLOB as ZIP archives and scans inside. \
                      Accepts a comma-separated list of glob patterns [example: *.zip,*.egg]"
     )]
-    excludefrom: Vec<PathBuf>,
+    unzip: Vec<String>,
 }
 
 fn main() {
@@ -410,10 +357,10 @@ pub mod test {
     use super::*;
 
     fn app(opts: &[&str]) -> App {
-        let mut cmdline = vec!["app"];
-        cmdline.extend_from_slice(&opts);
-        cmdline.push("dir");
-        App::from(args().get_matches_from(cmdline))
+        let mut argv = vec!["userscan"];
+        argv.extend_from_slice(opts);
+        argv.push("dir");
+        App::from(Opt::from_iter(&argv))
     }
 
     #[test]
@@ -435,5 +382,11 @@ pub mod test {
         let a = app(&["--list", "--register"]);
         assert!(a.output.list);
         assert!(a.register);
+    }
+
+    #[test]
+    fn sleep_value_in_ms() {
+        let a = app(&["--stutter=50"]);
+        assert_eq!(a.opt.sleep.unwrap(), Duration::from_millis(50));
     }
 }

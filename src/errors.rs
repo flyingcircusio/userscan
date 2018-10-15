@@ -8,7 +8,9 @@ error_chain! {
     foreign_links {
         Args(clap::Error);
         Fmt(::std::fmt::Error);
+        Float(::std::num::ParseFloatError);
         Ignore(ignore::Error);
+        Int(::std::num::ParseIntError);
         Io(::std::io::Error);
         MiniLZO(::minilzo::Error);
         RMPDecode(::rmp_serde::decode::Error);
@@ -40,7 +42,12 @@ error_chain! {
 
         CacheFull(max: usize) {
             description("Cache is full - terminate and don't change CG anymore")
-            display("Cache limit {} exceeded", max)
+            display("cache limit {} exceeded", max)
+        }
+
+        SleepOutOfBounds(sleep: f32) {
+            description("--sleep argument is either negative or too large")
+            display("duration '{}' must be less than 1000ms", sleep),
         }
     }
 }

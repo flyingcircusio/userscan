@@ -29,7 +29,7 @@ impl ProcessingContext {
     fn create(app: &App, stats: &mut Statistics, gcroots: &mut Register) -> Result<Self> {
         Ok(Self {
             startdev: app.start_meta()?.dev(),
-            sleep: app.sleep_ms.map(|val| Duration::new(0, (val * 1e6) as u32)),
+            sleep: app.opt.sleep,
             cache: Arc::new(app.cache()?),
             scanner: Arc::new(app.scanner()?),
             stats: stats.tx(),
@@ -110,7 +110,7 @@ pub fn spawn_threads(app: &App, gcroots: &mut Register) -> Result<Statistics> {
     let mut cache = crossbeam::scope(|threads| -> Result<Arc<Cache>> {
         let pctx = ProcessingContext::create(app, &mut stats, gcroots)?;
         let walker = app.walker()?.build_parallel();
-        info!("{}: Scouting {}", crate_name!(), p2s(&app.startdir));
+        info!("{}: Scouting {}", crate_name!(), p2s(&app.opt.startdir));
         if let Some(dur) = pctx.sleep {
             debug!("stutter {:?}", dur);
         }
@@ -127,7 +127,7 @@ pub fn spawn_threads(app: &App, gcroots: &mut Register) -> Result<Statistics> {
             .commit()?;
         cache.log_statistics();
     }
-    stats.log_summary(&app.startdir);
+    stats.log_summary(&app.opt.startdir);
     Ok(stats)
 }
 
@@ -215,7 +215,6 @@ mod tests {
 
         let mut gcroots = registry::tests::FakeGCRoots::new(p);
         let stats = spawn_threads(&app(p), &mut gcroots).unwrap();
-        println!("registered GC roots: {:?}", gcroots.registered);
         assert_eq!(gcroots.registered.len(), 1);
         assert_eq!(stats.softerrors, 2);
 
@@ -262,8 +261,7 @@ mod tests {
 
         let mut users = MockUsers::with_current_uid(100);
         users.add_user(User::new(100, "johndoe", 100).with_home_dir(&*p.to_string_lossy()));
-        let mut app = app(p);
-        app.dotexclude = false;
+        let app = app(p);
 
         wfile(p.join(".userscan-ignore"), "file2\n*.jpg\ndata*\n");
         for f in vec!["file1", "file2", "pic.jpg", "data.json"] {
