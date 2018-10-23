@@ -1,3 +1,8 @@
+//! File-based cache for `DirEntry` structures.
+//!
+//! The cache persists scan results between `userscan` invocations so that unchanged files don't
+//! need to be scanned again. It is currently saved as compressed MessagePack file.
+
 use super::cacheline::*;
 use super::{Lookup, StorePaths};
 use colored::Colorize;
@@ -66,16 +71,16 @@ impl Cache {
         }
     }
 
-    fn get(&self, dent: &DirEntry) -> Result<(Vec<PathBuf>, fs::Metadata)> {
-        let ino = dent.ino().ok_or(ErrorKind::CacheNotFound)?;
+    fn get(&self, dent: &DirEntry) -> Option<(Vec<PathBuf>, fs::Metadata)> {
+        let ino = dent.ino()?;
         let mut map = self.map.write().expect("tainted lock");
-        let c = map.get_mut(&ino).ok_or(ErrorKind::CacheNotFound)?;
-        let meta = dent.metadata()?;
+        let c = map.get_mut(&ino)?;
+        let meta = dent.metadata().ok()?;
         if c.ctime == meta.ctime() && c.ctime_nsec == meta.ctime_nsec() as u8 {
             c.used = true;
-            Ok((c.refs.clone(), meta))
+            Some((c.refs.clone(), meta))
         } else {
-            Err(ErrorKind::CacheNotFound.into())
+            None
         }
     }
 
@@ -92,7 +97,7 @@ impl Cache {
             }
         }
         match self.get(&dent) {
-            Ok((refs, metadata)) => {
+            Some((refs, metadata)) => {
                 self.hits.fetch_add(1, Ordering::Relaxed);
                 Lookup::Hit(StorePaths {
                     dent,
@@ -102,7 +107,7 @@ impl Cache {
                     metadata: Some(metadata),
                 })
             }
-            Err(_) => {
+            None => {
                 self.misses.fetch_add(1, Ordering::Relaxed);
                 Lookup::Miss(dent)
             }

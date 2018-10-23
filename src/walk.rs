@@ -54,9 +54,7 @@ impl ProcessingContext {
         };
         if let Some(err) = sp.error() {
             warn!("{}", err);
-            self.stats
-                .send(StatsMsg::SoftError)
-                .chain_err(|| ErrorKind::WalkAbort)?;
+            self.stats.send(StatsMsg::SoftError).unwrap();
         }
         if sp.metadata()?.dev() != self.startdev {
             return Ok(WalkState::Skip);
@@ -64,11 +62,9 @@ impl ProcessingContext {
         self.cache
             .insert(&mut sp)
             .chain_err(|| ErrorKind::WalkAbort)?;
-        self.stats
-            .send(StatsMsg::Scan((&sp).into()))
-            .chain_err(|| ErrorKind::WalkAbort)?;
+        self.stats.send(StatsMsg::Scan((&sp).into())).unwrap();
         if !sp.is_empty() {
-            self.gc.send(sp).chain_err(|| ErrorKind::WalkAbort)?;
+            self.gc.send(sp).unwrap();
         }
         Ok(WalkState::Continue)
     }
@@ -78,21 +74,18 @@ impl ProcessingContext {
         walker.run(|| {
             let pctx = self.clone();
             Box::new(move |res: ::std::result::Result<DirEntry, ignore::Error>| {
-                res.map_err(From::from)
+                res.map_err(Error::from)
                     .and_then(|dent| pctx.process_direntry(dent))
                     .unwrap_or_else(|err: Error| match err {
-                        Error(ErrorKind::WalkContinue, _) => WalkState::Continue,
                         Error(ErrorKind::WalkAbort, _) => {
                             error!("{}", &fmt_error_chain(&err)[2..]);
                             pctx.abort.store(true, Ordering::SeqCst);
                             WalkState::Quit
                         }
                         _ => {
-                            warn!("{}", fmt_error_chain(&err));
-                            match pctx.stats.send(StatsMsg::SoftError) {
-                                Err(_) => WalkState::Quit, // IPC broken
-                                Ok(_) => WalkState::Continue,
-                            }
+                            warn!("{}", &fmt_error_chain(&err));
+                            pctx.stats.send(StatsMsg::SoftError).unwrap();
+                            WalkState::Continue
                         }
                     })
             })
@@ -141,7 +134,7 @@ mod tests {
     use registry;
     use std::fs::{create_dir, set_permissions, File, Permissions};
     use std::io::Write;
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{symlink, PermissionsExt};
     use std::path::{Path, PathBuf};
     use tests::{app, assert_eq_vecs, fake_gc, FIXTURES};
     use users::mock::{MockUsers, User};
@@ -213,13 +206,33 @@ mod tests {
         );
         set_permissions(&unreadable_d, Permissions::from_mode(0o111)).unwrap();
 
+        let untraversable_d = p.join("untraversable-dir1");
+        create_dir(&untraversable_d).unwrap();
+        set_permissions(&untraversable_d, Permissions::from_mode(0o000)).unwrap();
+
         let mut gcroots = registry::tests::FakeGCRoots::new(p);
         let stats = spawn_threads(&app(p), &mut gcroots).unwrap();
         assert_eq!(gcroots.registered.len(), 1);
-        assert_eq!(stats.softerrors, 2);
+        assert_eq!(stats.softerrors, 3);
 
         // otherwise it won't clean up
         set_permissions(&unreadable_d, Permissions::from_mode(0o755)).unwrap();
+        set_permissions(&untraversable_d, Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn walk_infiniteloop() {
+        let t = TempDir::new("test_infinite_loop").unwrap();
+        let p = t.path();
+        create_dir(p.join("dir1")).unwrap();
+        create_dir(p.join("dir2")).unwrap();
+        symlink("../dir2/file2", p.join("dir1/file1")).unwrap();
+        symlink("../dir1/file1", p.join("dir2/file2")).unwrap();
+        symlink(".", p.join("recursive")).unwrap();
+        let mut gcroots = registry::tests::FakeGCRoots::new(p);
+        let stats = spawn_threads(&app(p), &mut gcroots).unwrap();
+        assert_eq!(gcroots.registered.len(), 0);
+        assert_eq!(stats.softerrors, 0);
     }
 
     #[test]

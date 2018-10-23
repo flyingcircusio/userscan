@@ -184,8 +184,8 @@ impl Scanner {
                 return res.chain_err(|| format!("{}: scan failed", p2s(dent.path())));
             }
         }
-        // silent fall-through: no idea how to handle this DirEntry
-        Err(ErrorKind::WalkContinue.into())
+        // fall-through: no idea how to handle this DirEntry
+        Err(ErrorKind::FiletypeUnknown(dent.path().to_path_buf()).into())
     }
 
     pub fn find_paths(&self, dent: DirEntry) -> Result<StorePaths> {

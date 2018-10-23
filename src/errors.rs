@@ -22,22 +22,11 @@ error_chain! {
     errors {
         WalkAbort {
             description("internal: abort walk")
-            display("")
-        }
-
-        WalkContinue {
-            description("internal: skip this entry and continue")
-            display("")
         }
 
         DentNoMetadata(path: PathBuf) {
             description("cannot process direntry which contains no metadata")
             display("DirEntry for {} does not contain metadata; cannot process", path.display())
-        }
-
-        CacheNotFound {
-            description("internal: cache miss")
-            display("")
         }
 
         CacheFull(max: usize) {
@@ -48,6 +37,12 @@ error_chain! {
         SleepOutOfBounds(sleep: f32) {
             description("--sleep argument is either negative or too large")
             display("duration '{}' must be less than 1000ms", sleep),
+        }
+
+        FiletypeUnknown(path: PathBuf) {
+            description("no idea how to handle this direntry"),
+            display("file {} has an unknown file type - don't know how to handle that",
+                    path.display())
         }
     }
 }
