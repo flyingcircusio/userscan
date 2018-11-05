@@ -23,7 +23,6 @@ extern crate rmp_serde;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
-#[macro_use]
 extern crate structopt;
 extern crate users;
 extern crate zip;
