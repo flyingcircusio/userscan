@@ -1,4 +1,5 @@
 #![allow(unused_doc_comments)]
+#![allow(deprecated)]
 
 use clap;
 use ignore;

@@ -53,7 +53,7 @@ use structopt::StructOpt;
 use users::os::unix::UserExt;
 
 static STORE: &str = "/nix/store/";
-static GC_PREFIX: &str = "/nix/var/nix/gcroots/profiles/per-user";
+static GC_PREFIX: &str = "/nix/var/nix/gcroots/per-user";
 static DOTEXCLUDE: &str = ".userscan-ignore";
 
 fn add_dotexclude<U: users::Users>(mut wb: WalkBuilder, u: &U) -> Result<WalkBuilder> {

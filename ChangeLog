@@ -1,3 +1,8 @@
+2019-03-28  Christian Kauhaus <kc@flyingcircus.io>
+
+	* Adapt GC_PREFIX to newer NixOS versions.
+	* Release 0.4.3
+
 2018-09-07  Christian Kauhaus <kc@flyingcircus.io>
 
 	* Print summary and soft error count in one line to ease log parsing.
