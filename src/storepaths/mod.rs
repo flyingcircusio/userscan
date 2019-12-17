@@ -1,11 +1,10 @@
-use errors::*;
+use crate::errors::*;
 use ignore::{self, DirEntry};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 mod cache;
-mod cacheline;
 pub use self::cache::Cache;
 
 #[derive(Debug)]
@@ -47,7 +46,7 @@ impl StorePaths {
     pub fn ino(&self) -> Result<u64> {
         self.dent
             .ino()
-            .ok_or_else(|| ErrorKind::DentNoMetadata(self.path().to_path_buf()).into())
+            .ok_or_else(|| UErr::DentNoMetadata(self.path().to_owned()))
     }
 
     pub fn metadata(&mut self) -> Result<fs::Metadata> {
@@ -57,7 +56,7 @@ impl StorePaths {
                 let m = self
                     .dent
                     .metadata()
-                    .chain_err(|| ErrorKind::DentNoMetadata(self.path().to_path_buf()))?;
+                    .map_err(|_| UErr::DentNoMetadata(self.path().to_owned()))?;
                 self.metadata = Some(m.clone());
                 Ok(m)
             }
@@ -70,7 +69,7 @@ impl StorePaths {
     }
 
     #[inline]
-    pub fn iter_refs<'a>(&'a self) -> Box<Iterator<Item = &Path> + 'a> {
+    pub fn iter_refs<'a>(&'a self) -> Box<dyn Iterator<Item = &Path> + 'a> {
         Box::new(self.refs.iter().map(|p| p.as_path()))
     }
 

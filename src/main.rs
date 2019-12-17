@@ -1,32 +1,16 @@
-// TODO failure
 // TODO --ignore-warnings option
 #![recursion_limit = "256"]
 
-extern crate atty;
-extern crate bytesize;
-extern crate chrono;
 #[macro_use]
 extern crate clap;
-extern crate colored;
-extern crate env_logger;
-#[macro_use]
-extern crate error_chain;
-extern crate fnv;
-extern crate ignore;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
-extern crate minilzo;
-extern crate nix;
-extern crate rmp_serde;
-extern crate serde;
 #[macro_use]
 extern crate serde_derive;
-extern crate structopt;
-extern crate users;
-extern crate zip;
 
+mod cachemap;
 mod errors;
 mod output;
 mod registry;
@@ -37,8 +21,9 @@ mod storepaths;
 mod tests;
 mod walk;
 
+use anyhow::{Context, Result};
 use bytesize::ByteSize;
-use errors::*;
+use errors::UErr;
 use ignore::overrides::OverrideBuilder;
 use ignore::WalkBuilder;
 use output::{p2s, Output};
@@ -47,7 +32,6 @@ use statistics::Statistics;
 use std::fs;
 use std::ops::DerefMut;
 use std::path::PathBuf;
-use std::time::Duration;
 use storepaths::Cache;
 use structopt::StructOpt;
 use users::os::unix::UserExt;
@@ -60,13 +44,13 @@ fn add_dotexclude<U: users::Users>(mut wb: WalkBuilder, u: &U) -> Result<WalkBui
     if let Some(me) = u.get_user_by_uid(u.get_effective_uid()) {
         let candidate = me.home_dir().join(DOTEXCLUDE);
         if candidate.exists() {
-            if let Some(err) = wb.add_ignore(candidate) {
-                return Err(err.into());
+            if let Some(err) = wb.add_ignore(&candidate) {
+                warn!("Invlid entry in ignore file {}: {}", p2s(candidate), err);
             }
         }
         Ok(wb)
     } else {
-        Err(format!("failed to locate UID {} in passwd", u.get_effective_uid()).into())
+        Err(UErr::UnknownUser(u.get_effective_uid()).into())
     }
 }
 
@@ -96,7 +80,7 @@ impl App {
             .hidden(false);
         for p in &self.opt.excludefrom {
             if let Some(err) = wb.add_ignore(p) {
-                return Err(err).chain_err(|| "failed to load exclude file".to_owned());
+                warn!("Problem with ignore file {}: {}", p2s(p), err);
             }
         }
         add_dotexclude(wb, &users::cache::UsersCache::new())
@@ -110,7 +94,7 @@ impl App {
         Ok(scan::Scanner::new(self.opt.quickcheck, ob.build()?))
     }
 
-    fn gcroots(&self) -> Result<Box<Register>> {
+    fn gcroots(&self) -> Result<Box<dyn Register>> {
         if self.opt.register {
             Ok(Box::new(GCRoots::new(
                 GC_PREFIX,
@@ -124,8 +108,8 @@ impl App {
 
     fn cache(&self) -> Result<Cache> {
         match self.opt.cache {
-            Some(ref f) => Cache::new(self.opt.cachelimit).open(f),
-            None => Ok(Cache::new(self.opt.cachelimit)),
+            Some(ref f) => Ok(Cache::new(self.opt.cache_limit).open(f)?),
+            None => Ok(Cache::new(self.opt.cache_limit)),
         }
     }
 
@@ -140,7 +124,7 @@ impl App {
         self.opt
             .startdir
             .canonicalize()
-            .chain_err(|| format!("start dir {} is not accessible", p2s(&self.opt.startdir)))
+            .with_context(|| format!("start dir {} is not accessible", p2s(&self.opt.startdir)))
     }
 
     /// The Metadata entry of the start directory.
@@ -178,7 +162,6 @@ impl From<Opt> for App {
 }
 
 lazy_static! {
-    static ref USAGE: String = format!("{} [OPTIONS] <DIRECTORY>", crate_name!());
     static ref AFTER_HELP: String = format!(
         "Ignore globs are always loaded from ~/{} if it exists. For the format of all ignore \
          files refer to the gitignore(5) man page.",
@@ -191,152 +174,92 @@ fn parse_kb(arg: &str) -> Result<ByteSize> {
     Ok(ByteSize::kib(n))
 }
 
-fn parse_sleep(arg: &str) -> Result<Duration> {
-    let s: f32 = arg.parse()?;
-    if s < 0.0 || s >= 1000.0 {
-        Err(ErrorKind::SleepOutOfBounds(s).into())
-    } else {
-        Ok(Duration::from_micros((s * 1e3) as u64))
-    }
-}
-
 #[derive(StructOpt, Debug, Clone, Default)]
 #[structopt(
     author = "© Flying Circus Internet Operations GmbH and contributors.",
-    raw(usage = "USAGE.as_str()", after_help = "AFTER_HELP.as_str()")
+    after_help = AFTER_HELP.as_str()
 )]
 struct Opt {
     /// Starts scan in DIRECTORY
-    #[structopt(
-        value_name = "DIRECTORY",
-        raw(required = "true"),
-        parse(from_os_str)
-    )]
+    #[structopt(value_name = "DIRECTORY", parse(from_os_str))]
     startdir: PathBuf,
     /// Only prints Nix store references while scanning (doesn't register)
-    #[structopt(
-        short = "l",
-        long = "list",
-        raw(display_order = "1"),
-        long_help = "Prints Nix store references while scanning. GC roots are not registered when \
-                     this option is active. Specify -r/--register in addition to get both listing \
-                     and registration"
-    )]
+    ///
+    /// GC roots are not registered when this option is active. Specify -r/--register in addition
+    /// to get both listing and registration.
+    #[structopt(short, long, display_order(1))]
     list: bool,
     /// Registers references even when in list mode
-    #[structopt(
-        short = "r",
-        long = "register",
-        raw(display_order = "2"),
-        long_help = "Registers references even when in list mode. Registration is enabled by \
-                     default if -l/--list not given"
-    )]
+    ///
+    /// Registration is enabled by default if -l/--list not given
+    #[structopt(short, long, display_order(2))]
     register: bool,
     /// Keeps results between runs in FILE
-    #[structopt(
-        short = "c",
-        long = "cache",
-        value_name = "FILE",
-        parse(from_os_str),
-        long_help = "Caches scan results in FILE to avoid re-scanning unchanged files. The cache \
-                     is kept as a compressed messagepack file"
-    )]
+    ///
+    /// Caches scan results in FILE to avoid re-scanning unchanged files. The cache is kept as a
+    /// compressed messagepack file.
+    #[structopt(short, long, value_name = "FILE", parse(from_os_str))]
     cache: Option<PathBuf>,
     /// Limits cache to N entries
-    #[structopt(
-        short = "L",
-        long = "cache-limit",
-        value_name = "N",
-        long_help = "Aborts program execution when trying to store more than N entries in the \
-                     cache. This helps to limit memory consumption"
-    )]
-    cachelimit: Option<usize>,
+    ///
+    /// Aborts program execution when trying to store more than N entries in the cache. This helps
+    /// to limit memory consumption.
+    #[structopt(short = "L", long, value_name = "N")]
+    cache_limit: Option<usize>,
     /// Prints each file with references on a single line
-    #[structopt(short = "1", long = "oneline")]
+    #[structopt(short = "1", long)]
     oneline: bool,
     /// Funky colorful output
-    #[structopt(
-        short = "C",
-        long = "color",
-        value_name = "WHEN",
-        default_value = "auto",
-        raw(
-            takes_value = "true",
-            possible_values = r#"&["always", "never", "auto"]"#
-        ),
-        long_help = r#"Enables colored output. If set to "auto", color is on if run in a terminal"#
+    ///
+    /// Enables colored output. If set to "auto", color is on if run in a terminal.
+    #[structopt(short = "C", long, value_name = "WHEN", default_value = "auto",
+                possible_values(&["always", "never", "auto"])
     )]
     color: String,
     /// Prints detailed statistics like scans per file type
     #[structopt(short = "S", long = "stats", alias = "statistics")]
     statistics: bool,
-    /// Sleeps SLEEP ms after each file access
-    #[structopt(
-        short = "s",
-        long = "stutter",
-        value_name = "SLEEP",
-        parse(try_from_str = "parse_sleep"),
-        long_help = "Sleeps SLEEP milliseconds after each file to reduce I/O load. Files \
-                     loaded from the cache are not subject to stuttering"
-    )]
-    sleep: Option<Duration>,
-    /// Additional output
-    #[structopt(short = "v", long = "verbose")]
+    /// Displays additional output like scan times
+    #[structopt(short, long)]
     verbose: bool,
     /// Shows every file opened and lots of other stuff (implies --verbose)
-    #[structopt(short = "d", long = "debug", raw(display_order = "100"))]
+    #[structopt(short, long, display_order(100))]
     debug: bool,
     /// Scans only the first SIZE kB of a file
-    #[structopt(
-        short = "q",
-        long = "quickcheck",
-        default_value = "512",
-        value_name = "SIZE",
-        parse(try_from_str = "parse_kb"),
-        long_help = "Gives up if no Nix store references are found in the first SIZE kilobytes of \
-                     a file. Assumes that at least one Nix store reference is located near the \
-                     beginning. Speeds up scanning large files considerably"
-    )]
+    ///
+    /// Gives up if no Nix store references are found in the first SIZE kilobytes of a file.
+    /// Assumes that at least one Nix store reference is located near the beginning. Speeds up
+    /// scanning large files considerably.
+    #[structopt(short, long, default_value = "512", value_name = "SIZE", parse(try_from_str = parse_kb))]
     quickcheck: ByteSize,
     /// Skips files matching GLOB
-    #[structopt(
-        short = "e",
-        long = "exclude",
-        value_name = "GLOB",
-        raw(number_of_values = "1"),
-        long_help = "Skips files matching GLOB. May be given multiple times"
-    )]
+    ///
+    /// Skips files matching GLOB. May be given multiple times.
+    #[structopt(short, long, value_name = "GLOB", number_of_values(1))]
     exclude: Vec<String>,
     /// Scans only files matching GLOB
-    #[structopt(
-        short = "i",
-        long = "include",
-        value_name = "GLOB",
-        raw(number_of_values = "1"),
-        long_help = "Scans only files matching GLOB. may be given multiple times. note \
-                     including individual files shows no effect if their containing directory is \
-                     matched by an exclude glob"
-    )]
+    ///
+    /// Scans only files matching GLOB. may be given multiple times. note including individual
+    /// files shows no effect if their containing directory is matched by an exclude glob.
+    #[structopt(short, long, value_name = "GLOB", number_of_values(1))]
     include: Vec<String>,
     /// Loads exclude globs from FILE
+    ///
+    /// Loads exclude globs from FILE, which is expected to be in .gitignore format. May be given
+    /// multiple times.
     #[structopt(
         short = "E",
-        long = "excludefrom",
+        long,
         value_name = "FILE",
-        raw(number_of_values = "1"),
-        parse(from_os_str),
-        long_help = "Loads exclude globs from FILE, which is expected to be in .gitignore format. \
-                     May be given multiple times"
+        number_of_values(1),
+        parse(from_os_str)
     )]
     excludefrom: Vec<PathBuf>,
     /// Scans inside ZIP archives for files matching GLOB
-    #[structopt(
-        short = "z",
-        long = "unzip",
-        raw(use_delimiter = "true"),
-        long_help = "Unpacks all files with matching GLOB as ZIP archives and scans inside. \
-                     Accepts a comma-separated list of glob patterns [example: *.zip,*.egg]"
-    )]
+    ///
+    /// Unpacks all files with matching GLOB as ZIP archives and scans inside. Accepts a
+    /// comma-separated list of glob patterns [example: *.zip,*.egg].
+    #[structopt(short, long, use_delimiter(true))]
     unzip: Vec<String>,
 }
 
@@ -344,7 +267,7 @@ fn main() {
     let app = App::from(Opt::from_args());
     match app.run() {
         Err(ref err) => {
-            error!("{}", output::fmt_error_chain(err));
+            error!("{:#?}", err);
             std::process::exit(2)
         }
         Ok(exitcode) => std::process::exit(exitcode),

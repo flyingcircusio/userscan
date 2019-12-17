@@ -1,21 +1,14 @@
-use super::{Opt, STORE};
+use crate::storepaths::StorePaths;
+use crate::{Opt, STORE};
+
 use atty::{self, Stream};
 use colored::{self, ColoredString, Colorize};
 use env_logger::Builder;
-use errors::*;
 use log::{Level, LevelFilter};
 use std::io;
 use std::io::prelude::*;
 use std::path::Path;
 use std::time::Duration;
-use storepaths::StorePaths;
-
-pub fn fmt_error_chain(err: &Error) -> String {
-    err.iter()
-        .map(|e| format!("{}", e))
-        .collect::<Vec<_>>()
-        .join(": ")
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Output {
@@ -61,17 +54,20 @@ impl Output {
                 Level::Error => {
                     writeln!(buf, "{}: {}", r.level().to_string().red().bold(), r.args())
                 }
-                Level::Warn => writeln!(buf, "{}: {}", r.level().to_string().yellow(), r.args()),
+                Level::Warn => {
+                    writeln!(buf, "{}: {}", r.level().to_string().yellow(), r.args())
+                }
                 Level::Info => writeln!(buf, "{}", r.args()),
                 _ => writeln!(buf, "{}", r.args().to_string().blue()),
-            }).filter(None, self.level)
+            })
+            .filter(None, self.level)
             .init();
     }
 
     /// Outputs the name of a scanned file together with the store paths found inside.
     ///
     /// Depending on the desired output format the files are either space- or newline-separated.
-    pub fn write_store_paths(&self, w: &mut Write, sp: &StorePaths) -> io::Result<()> {
+    pub fn write_store_paths(&self, w: &mut dyn Write, sp: &StorePaths) -> io::Result<()> {
         let filename = format!(
             "{}{}",
             sp.path().display(),
@@ -86,14 +82,13 @@ impl Output {
     }
 
     #[inline]
-    pub fn print_store_paths(&self, sp: &StorePaths) -> Result<()> {
+    pub fn print_store_paths(&self, sp: &StorePaths) {
         if !self.list {
-            return Ok(());
+            return;
         }
         let w = io::stdout();
         let mut w = io::BufWriter::new(w.lock());
-        self.write_store_paths(&mut w, sp)
-            .chain_err(|| ErrorKind::WalkAbort)
+        self.write_store_paths(&mut w, sp).ok();
     }
 }
 

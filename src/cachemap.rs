@@ -1,8 +1,8 @@
-use errors::*;
+use crate::output::p2s;
+
 use fnv::FnvHashMap;
 use minilzo;
 use nix::fcntl;
-use output::p2s;
 use rmp_serde::{decode, encode};
 use std::fs;
 use std::io;
@@ -10,6 +10,23 @@ use std::io::prelude::*;
 use std::ops::{Deref, DerefMut};
 use std::os::unix::prelude::*;
 use std::path::{Path, PathBuf};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("I/O error")]
+    IO(#[from] io::Error),
+    #[error("LZO error")]
+    LZO(#[from] minilzo::Error),
+    #[error("MessagePack decode error")]
+    RmpDE(#[from] rmp_serde::decode::Error),
+    #[error("MessagePack encode error")]
+    RmpEN(#[from] rmp_serde::encode::Error),
+    #[error("Cannot acquire lock")]
+    Lock(#[from] nix::Error),
+}
+
+type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Debug, PartialOrd, Clone, Serialize, Deserialize)]
 pub struct CacheLine {
@@ -22,7 +39,9 @@ pub struct CacheLine {
 
 impl PartialEq for CacheLine {
     fn eq(&self, other: &CacheLine) -> bool {
-        self.ctime == other.ctime && self.ctime_nsec == other.ctime_nsec && self.refs == other.refs
+        self.ctime == other.ctime
+            && self.ctime_nsec == other.ctime_nsec
+            && self.refs == other.refs
     }
 }
 
@@ -44,14 +63,8 @@ pub fn open_locked<P: AsRef<Path>>(path: P) -> Result<fs::File> {
         .write(true)
         .create(true)
         .truncate(false)
-        .open(&path)
-        .chain_err(|| format!("failed to open cache file {}", p2s(&path)))?;
-    fcntl::flock(f.as_raw_fd(), fcntl::FlockArg::LockExclusiveNonblock).chain_err(|| {
-        format!(
-            "failed to lock cache file {}: another instance running?",
-            p2s(&path)
-        )
-    })?;
+        .open(&path)?;
+    fcntl::flock(f.as_raw_fd(), fcntl::FlockArg::LockExclusiveNonblock)?;
     Ok(f)
 }
 
@@ -71,10 +84,9 @@ impl CacheMap {
     pub fn load<P: AsRef<Path>>(file: &mut fs::File, filename: P) -> Result<CacheMap> {
         let mut compr = Vec::new();
         file.seek(io::SeekFrom::Start(0))?;
-        file.read_to_end(&mut compr)
-            .chain_err(|| format!("error while reading {}", p2s(&filename)))?;
+        file.read_to_end(&mut compr)?;
         match minilzo::decompress(&compr, compr.len() * 10)
-            .map_err(|e| e.into())
+            .map_err(Error::from)
             .and_then(|data| decode::from_slice(&data).map_err(Error::from))
         {
             Ok(cachemap) => Ok(cachemap),
@@ -90,11 +102,10 @@ impl CacheMap {
     }
 
     /// Writes a CacheMap structure into an open file
-    pub fn save<P: AsRef<Path>>(&self, file: &mut fs::File, filename: P) -> Result<()> {
+    pub fn save(&self, file: &mut fs::File) -> Result<()> {
         file.seek(io::SeekFrom::Start(0))?;
         file.set_len(0)?;
-        file.write_all(&minilzo::compress(&encode::to_vec(self)?)?)
-            .chain_err(|| format!("error while writing {}", p2s(&filename)))
+        Ok(file.write_all(&minilzo::compress(&encode::to_vec(self)?)?)?)
     }
 }
 

@@ -1,23 +1,22 @@
 extern crate crossbeam;
 
-use super::App;
-use errors::*;
+use crate::errors::UErr;
+use crate::output::p2s;
+use crate::registry::{GCRootsTx, Register};
+use crate::scan::Scanner;
+use crate::statistics::{Statistics, StatsMsg, StatsTx};
+use crate::storepaths::{Cache, Lookup};
+use crate::App;
+
+use anyhow::{Context, Result};
 use ignore::{self, DirEntry, WalkParallel, WalkState};
-use output::{fmt_error_chain, p2s};
-use registry::{GCRootsTx, Register};
-use scan::Scanner;
-use statistics::{Statistics, StatsMsg, StatsTx};
 use std::os::unix::fs::MetadataExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
-use storepaths::{Cache, Lookup};
 
 #[derive(Clone, Debug)]
 struct ProcessingContext {
     startdev: u64,
-    sleep: Option<Duration>,
     cache: Arc<Cache>,
     scanner: Arc<Scanner>,
     stats: StatsTx,
@@ -26,10 +25,9 @@ struct ProcessingContext {
 }
 
 impl ProcessingContext {
-    fn create(app: &App, stats: &mut Statistics, gcroots: &mut Register) -> Result<Self> {
+    fn create(app: &App, stats: &mut Statistics, gcroots: &mut dyn Register) -> Result<Self> {
         Ok(Self {
             startdev: app.start_meta()?.dev(),
-            sleep: app.opt.sleep,
             cache: Arc::new(app.cache()?),
             scanner: Arc::new(app.scanner()?),
             stats: stats.tx(),
@@ -46,9 +44,7 @@ impl ProcessingContext {
         let mut sp = match self.cache.lookup(dent) {
             Lookup::Dir(sp) | Lookup::Hit(sp) => sp,
             Lookup::Miss(d) => {
-                if let Some(dur) = self.sleep {
-                    thread::sleep(dur);
-                }
+                // XXX new stutter logic
                 self.scanner.find_paths(d)?
             }
         };
@@ -59,9 +55,7 @@ impl ProcessingContext {
         if sp.metadata()?.dev() != self.startdev {
             return Ok(WalkState::Skip);
         }
-        self.cache
-            .insert(&mut sp)
-            .chain_err(|| ErrorKind::WalkAbort)?;
+        self.cache.insert(&mut sp).context(UErr::WalkAbort)?;
         self.stats.send(StatsMsg::Scan((&sp).into())).unwrap();
         if !sp.is_empty() {
             self.gc.send(sp).unwrap();
@@ -74,16 +68,16 @@ impl ProcessingContext {
         walker.run(|| {
             let pctx = self.clone();
             Box::new(move |res: ::std::result::Result<DirEntry, ignore::Error>| {
-                res.map_err(Error::from)
+                res.map_err(From::from)
                     .and_then(|dent| pctx.process_direntry(dent))
-                    .unwrap_or_else(|err: Error| match err {
-                        Error(ErrorKind::WalkAbort, _) => {
-                            error!("{}", &fmt_error_chain(&err)[2..]);
+                    .unwrap_or_else(|err| match err.downcast_ref::<UErr>() {
+                        Some(UErr::WalkAbort) => {
+                            error!("{:#}", &err);
                             pctx.abort.store(true, Ordering::SeqCst);
                             WalkState::Quit
                         }
                         _ => {
-                            warn!("{}", &fmt_error_chain(&err));
+                            warn!("{:#}", &err);
                             pctx.stats.send(StatsMsg::SoftError).unwrap();
                             WalkState::Continue
                         }
@@ -91,22 +85,19 @@ impl ProcessingContext {
             })
         });
         if self.abort.load(Ordering::SeqCst) {
-            Err("Aborting program execution".into())
+            Err(UErr::WalkAbort.into())
         } else {
             Ok(self.cache)
         }
     }
 }
 
-pub fn spawn_threads(app: &App, gcroots: &mut Register) -> Result<Statistics> {
+pub fn spawn_threads(app: &App, gcroots: &mut dyn Register) -> Result<Statistics> {
     let mut stats = app.statistics();
     let mut cache = crossbeam::scope(|threads| -> Result<Arc<Cache>> {
         let pctx = ProcessingContext::create(app, &mut stats, gcroots)?;
         let walker = app.walker()?.build_parallel();
         info!("{}: Scouting {}", crate_name!(), p2s(&app.opt.startdir));
-        if let Some(dur) = pctx.sleep {
-            debug!("stutter {:?}", dur);
-        }
         let walk_hdl = threads.spawn(move || pctx.walk(walker));
         threads.spawn(|| stats.receive_loop());
         gcroots.register_loop()?;
@@ -260,7 +251,8 @@ mod tests {
                 "dir2/ignored",
                 "dir2/link",
                 "miniegg-1-py3.5.egg",
-            ].into_iter()
+            ]
+            .into_iter()
             .map(PathBuf::from)
             .collect::<Vec<_>>(),
             walk2vec(&app.walker().unwrap(), &*FIXTURES)

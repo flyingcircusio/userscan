@@ -1,49 +1,48 @@
-#![allow(unused_doc_comments)]
-#![allow(deprecated)]
-
-use clap;
-use ignore;
+use crate::cachemap;
+use std::io;
 use std::path::PathBuf;
+use thiserror::Error;
+use users::uid_t;
+use zip::result::ZipError;
 
-error_chain! {
-    foreign_links {
-        Args(clap::Error);
-        Fmt(::std::fmt::Error);
-        Float(::std::num::ParseFloatError);
-        Ignore(ignore::Error);
-        Int(::std::num::ParseIntError);
-        Io(::std::io::Error);
-        MiniLZO(::minilzo::Error);
-        RMPDecode(::rmp_serde::decode::Error);
-        RMPEncode(::rmp_serde::encode::Error);
-        StripPrefix(::std::path::StripPrefixError);
-        Zip(::zip::result::ZipError);
-    }
-
-    errors {
-        WalkAbort {
-            description("internal: abort walk")
-        }
-
-        DentNoMetadata(path: PathBuf) {
-            description("cannot process direntry which contains no metadata")
-            display("DirEntry for {} does not contain metadata; cannot process", path.display())
-        }
-
-        CacheFull(max: usize) {
-            description("Cache is full - terminate and don't change CG anymore")
-            display("cache limit {} exceeded", max)
-        }
-
-        SleepOutOfBounds(sleep: f32) {
-            description("--sleep argument is either negative or too large")
-            display("duration '{}' must be less than 1000ms", sleep),
-        }
-
-        FiletypeUnknown(path: PathBuf) {
-            description("no idea how to handle this direntry"),
-            display("file {} has an unknown file type - don't know how to handle that",
-                    path.display())
-        }
-    }
+#[derive(Debug, Error)]
+pub enum UErr {
+    #[error("internal: abort directory walk")]
+    WalkAbort,
+    #[error("DirEntry for '{0}' does not contain metadata; cannot process")]
+    DentNoMetadata(PathBuf),
+    #[error("Cache limit {0} exceeded")]
+    CacheFull(usize),
+    #[error("File '{0}' has an unknown file type - don't know how to handle that")]
+    FiletypeUnknown(PathBuf),
+    #[error("Failed to locate UID {0} in passwd database")]
+    UnknownUser(uid_t),
+    #[error("Failed to unpack ZIP archive '{0}': {1}")]
+    ZIP(PathBuf, #[source] ZipError),
+    #[error("Cannot determine current user. Who am I?")]
+    WhoAmI,
+    #[error("startdir must be an absolute path")]
+    Relative,
+    #[error("Directory traversal error")]
+    Traverse(#[from] ignore::Error),
+    #[error("Failed to create '{0}'")]
+    Create(PathBuf, #[source] io::Error),
+    #[error("Failed to remove '{0}'")]
+    Remove(PathBuf, #[source] io::Error),
+    #[error("Failed to read '{0}'")]
+    Read(PathBuf, #[source] io::Error),
+    #[error("Failed to read link '{0}'")]
+    ReadLink(PathBuf, #[source] io::Error),
+    #[error("Failed to open '{0}'")]
+    Open(PathBuf, #[source] io::Error),
+    #[error("Failed to determine current directory")]
+    CWD(#[source] io::Error),
+    #[error("Failed to load cache from '{0}'")]
+    LoadCache(PathBuf, #[source] cachemap::Error),
+    #[error("Failed to save cache to '{0}'")]
+    SaveCache(PathBuf, #[source] cachemap::Error),
+    #[error("I/O error")]
+    IO(#[from] io::Error),
 }
+
+pub type Result<T, E = UErr> = ::std::result::Result<T, E>;

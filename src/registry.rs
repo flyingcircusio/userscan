@@ -1,19 +1,20 @@
 use super::STORE;
+use crate::errors::*;
+use crate::output::{p2s, Output};
+use crate::storepaths::StorePaths;
+
 use colored::Colorize;
-use errors::*;
 use ignore::{self, DirEntry, WalkBuilder};
-use output::{p2s, Output};
 use std::collections::HashSet;
 use std::env;
 use std::ffi::OsStr;
 use std::fs;
 use std::io;
-use std::os::unix;
+use std::os::unix::fs::symlink;
 use std::os::unix::prelude::*;
 use std::path::{Path, PathBuf};
 use std::result;
 use std::sync::mpsc;
-use storepaths::StorePaths;
 use users::get_effective_username;
 
 pub type GCRootsTx = mpsc::Sender<StorePaths>;
@@ -49,12 +50,17 @@ impl GCRoots {
     pub fn new<P: AsRef<Path>>(peruser: &str, startdir: P, output: &Output) -> Result<Self> {
         let user = match get_effective_username() {
             Some(u) => u,
-            None => return Err("failed to query current user name".into()),
+            None => return Err(UErr::WhoAmI),
         };
         let prefix = Path::new(peruser).join(&user);
-        let cwd = env::current_dir().chain_err(|| "failed to determine current dir")?;
+        let cwd = env::current_dir().map_err(|e| UErr::CWD(e))?;
         Ok(GCRoots {
-            topdir: prefix.join(startdir.as_ref().strip_prefix("/")?),
+            topdir: prefix.join(
+                startdir
+                    .as_ref()
+                    .strip_prefix("/")
+                    .map_err(|_| UErr::Relative)?,
+            ),
             prefix,
             cwd,
             output: output.to_owned(),
@@ -71,10 +77,8 @@ impl GCRoots {
 
     fn create_link(&mut self, dir: &Path, linkname: PathBuf, target: &Path) -> Result<usize> {
         info!("creating link {}", p2s(&linkname));
-        fs::create_dir_all(dir)
-            .chain_err(|| format!("failed to create GC dir {}", dir.display()))?;
-        unix::fs::symlink(target, &linkname)
-            .chain_err(|| format!("failed to create symlink {}", linkname.display()))?;
+        fs::create_dir_all(dir).map_err(|e| UErr::Create(dir.to_owned(), e))?;
+        symlink(target, &linkname).map_err(|e| UErr::Create(linkname.to_owned(), e))?;
         self.seen.insert(linkname);
         Ok(1)
     }
@@ -97,22 +101,20 @@ impl GCRoots {
                     Ok(0)
                 } else {
                     fs::remove_file(&linkname)
-                        .chain_err(|| format!("cannot remove {}", linkname.display()))?;
+                        .map_err(|e| UErr::Remove(linkname.to_owned(), e))?;
                     self.create_link(dir.as_ref(), linkname, &target)
                 }
             }
             Err(e) => match e.kind() {
                 io::ErrorKind::NotFound => self.create_link(dir.as_ref(), linkname, &target),
-                _ => Err(e).chain_err(|| {
-                    format!("failed to evaluate existing link {}", linkname.display())
-                }),
+                _ => Err(e).map_err(|e| UErr::ReadLink(linkname.to_owned(), e)),
             },
         }
     }
 
     /// Registers all Nix store paths with the garbage collector.
     fn register(&mut self, sp: &StorePaths) -> Result<usize> {
-        self.output.print_store_paths(sp)?;
+        self.output.print_store_paths(sp);
         let dir = self.gc_link_dir(sp.path());
         sp.iter_refs().map(|p| self.link(dir.as_path(), p)).sum()
     }
@@ -130,7 +132,7 @@ impl GCRoots {
             .parents(false)
             .build()
             .map(|res: result::Result<DirEntry, ignore::Error>| {
-                let dent = res.chain_err(|| "clean up".to_owned())?;
+                let dent = res?;
                 let path = dent.path();
                 match dent.file_type() {
                     Some(ft) if ft.is_dir() => {
@@ -150,7 +152,8 @@ impl GCRoots {
                     }
                     _ => Ok(0),
                 }
-            }).sum()
+            })
+            .sum()
     }
 }
 
@@ -209,15 +212,12 @@ impl NullGCRoots {
 
 impl Register for NullGCRoots {
     fn register_loop(&mut self) -> Result<()> {
-        match self.rx.take() {
-            Some(ref rx) => {
-                for storepaths in rx {
-                    self.output.print_store_paths(&storepaths)?;
-                }
-                Ok(())
+        if let Some(ref rx) = self.rx.take() {
+            for storepaths in rx {
+                self.output.print_store_paths(&storepaths);
             }
-            None => Ok(()),
         }
+        Ok(())
     }
 
     fn tx(&mut self) -> GCRootsTx {
@@ -282,18 +282,16 @@ pub mod tests {
                 .unwrap(),
             1
         );
-        assert!(
-            fs::metadata(td.path().join("d1"))
-                .expect("dir d1 not created")
-                .is_dir()
-        );
+        assert!(fs::metadata(td.path().join("d1"))
+            .expect("dir d1 not created")
+            .is_dir());
     }
 
     #[test]
     fn create_link_should_correct_existing_link() {
         let (td, mut gc) = _gcroots();
         let link = td.path().join("f0vdg3cb0005ksjb0fd5qs6f56zg2qs5");
-        unix::fs::symlink("changeme", &link).unwrap();
+        symlink("changeme", &link).unwrap();
         let _ = gc.link(td.path(), "f0vdg3cb0005ksjb0fd5qs6f56zg2qs5-v");
         assert_eq!(
             PathBuf::from("/nix/store/f0vdg3cb0005ksjb0fd5qs6f56zg2qs5-v"),
@@ -336,8 +334,11 @@ pub mod tests {
                     for storepaths in rx {
                         for r in storepaths.refs() {
                             let relpath = storepaths.path().strip_prefix(&self.prefix).unwrap();
-                            self.registered
-                                .push(format!("{}|{}", relpath.display(), r.display()));
+                            self.registered.push(format!(
+                                "{}|{}",
+                                relpath.display(),
+                                r.display()
+                            ));
                         }
                     }
                     Ok(())

@@ -3,12 +3,12 @@
 //! The cache persists scan results between `userscan` invocations so that unchanged files don't
 //! need to be scanned again. It is currently saved as compressed MessagePack file.
 
-use super::cacheline::*;
 use super::{Lookup, StorePaths};
+use crate::cachemap::*;
+use crate::errors::*;
+use crate::output::p2s;
 use colored::Colorize;
-use errors::*;
 use ignore::DirEntry;
-use output::p2s;
 use std::fs;
 use std::os::unix::prelude::*;
 use std::path::{Path, PathBuf};
@@ -38,12 +38,13 @@ impl Cache {
         self.filename = path.as_ref().to_path_buf();
         info!("Loading cache {}", p2s(&self.filename));
         if let Some(p) = path.as_ref().parent() {
-            fs::create_dir_all(p)
-                .chain_err(|| format!("cache: failed to create leading directory {}", p2s(p)))?;
+            fs::create_dir_all(p).map_err(|e| UErr::Create(p.to_owned(), e))?;
         }
-        let mut cachefile = open_locked(&path)?;
-        if cachefile.metadata()?.len() > 0 {
-            let map = CacheMap::load(&mut cachefile, &self.filename)?;
+        let mut cachefile =
+            open_locked(&path).map_err(|e| UErr::LoadCache(self.filename.clone(), e))?;
+        if cachefile.metadata().map_err(UErr::from)?.len() > 0 {
+            let map = CacheMap::load(&mut cachefile, &self.filename)
+                .map_err(|e| UErr::LoadCache(self.filename.clone(), e))?;
             debug!("loaded {} entries from cache", map.len());
             self.map = RwLock::new(map);
             self.dirty = AtomicBool::new(false);
@@ -64,7 +65,8 @@ impl Cache {
             let mut map = self.map.write().expect("tainted lock");
             map.retain(|_, ref mut v| v.used);
             debug!("writing {} entries to cache", map.len());
-            map.save(file, &self.filename)
+            map.save(file)
+                .map_err(|e| UErr::SaveCache(self.filename.clone(), e))
         } else {
             // don't do anything if there is no cache file except for evicting unused elements
             Ok(())
@@ -121,7 +123,7 @@ impl Cache {
         let meta = sp.metadata()?;
         let mut map = self.map.write().expect("tainted lock");
         if self.limit > 0 && map.len() >= self.limit {
-            return Err(ErrorKind::CacheFull(self.limit).into());
+            return Err(UErr::CacheFull(self.limit));
         }
         map.insert(
             sp.ino()?,

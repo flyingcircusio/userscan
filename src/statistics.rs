@@ -1,6 +1,8 @@
+use crate::output::{d2s, p2s};
+use crate::storepaths::StorePaths;
 use atty::{self, Stream};
+use bytesize::ByteSize;
 use colored::Colorize;
-use output::{d2s, p2s};
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::hash::Hash;
@@ -8,8 +10,6 @@ use std::ops::{Add, AddAssign};
 use std::path::Path;
 use std::sync::mpsc;
 use std::time;
-use storepaths::StorePaths;
-use ByteSize;
 
 pub type StatsTx = mpsc::Sender<StatsMsg>;
 
@@ -78,7 +78,8 @@ where
         .map(|e| {
             let (k, p): (&T, &Pair) = e;
             (p.files, p.bytes, k.clone())
-        }).collect::<Vec<(usize, u64, T)>>();
+        })
+        .collect::<Vec<(usize, u64, T)>>();
     res.sort_by(|a, b| a.0.cmp(&b.0).reverse());
     res.truncate(cutoff);
     res
@@ -213,7 +214,6 @@ impl Statistics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tests::*;
 
     fn _msg_read(bytes: u64, ext: &str) -> StatsMsg {
         StatsMsg::Scan(File {

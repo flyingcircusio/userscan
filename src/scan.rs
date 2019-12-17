@@ -1,21 +1,19 @@
-extern crate memmap;
-extern crate regex;
-extern crate twoway;
+use crate::errors::*;
+use crate::output::p2s;
+use crate::storepaths::StorePaths;
 
-use self::memmap::Mmap;
-use self::regex::bytes::Regex;
+use anyhow::Result as AResult;
+use anyhow::{anyhow, Context};
 use bytesize::ByteSize;
-use errors::*;
 use ignore::overrides::Override;
 use ignore::{DirEntry, Match};
-use output::p2s;
-use std::error::Error;
+use memmap::Mmap;
+use regex::bytes::Regex;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::Read;
 use std::os::unix::prelude::*;
 use std::path::PathBuf;
-use storepaths::StorePaths;
 use zip::read::ZipArchive;
 use zip::result::ZipError;
 
@@ -53,7 +51,7 @@ fn scan_regular_quickcheck(
     dent: &DirEntry,
     meta: fs::Metadata,
     quickcheck: u64,
-) -> Result<ScanResult> {
+) -> AResult<ScanResult> {
     debug!("scanning {}", dent.path().display());
     let mmap = unsafe { Mmap::map(&fs::File::open(dent.path())?)? };
     if quickcheck > 0
@@ -77,7 +75,7 @@ fn scan_regular_quickcheck(
     })
 }
 
-fn scan_regular(dent: &DirEntry, quickcheck: ByteSize) -> Result<ScanResult> {
+fn scan_regular(dent: &DirEntry, quickcheck: ByteSize) -> AResult<ScanResult> {
     let meta = dent.metadata()?;
     if meta.len() < MIN_STOREREF_LEN {
         // minimum length to fit a single store reference not reached
@@ -92,7 +90,7 @@ fn scan_regular(dent: &DirEntry, quickcheck: ByteSize) -> Result<ScanResult> {
     }
 }
 
-fn scan_zip_archive(dent: &DirEntry) -> Result<ScanResult> {
+fn scan_zip_archive(dent: &DirEntry) -> AResult<ScanResult> {
     debug!("Scanning ZIP archive {}", dent.path().display());
     let meta = dent.metadata()?;
     let mut archive = match ZipArchive::new(fs::File::open(&dent.path())?) {
@@ -105,7 +103,7 @@ fn scan_zip_archive(dent: &DirEntry) -> Result<ScanResult> {
             );
             return scan_regular_quickcheck(dent, meta, 0);
         }
-        Err(e) => return Err(e.into()),
+        Err(e) => return Err(UErr::ZIP(dent.path().to_owned(), e).into()),
     };
     let mut buf = Vec::new();
     let mut refs = Vec::new();
@@ -116,7 +114,9 @@ fn scan_zip_archive(dent: &DirEntry) -> Result<ScanResult> {
         );
     }
     for i in 0..archive.len() {
-        let mut f = archive.by_index(i)?;
+        let mut f = archive
+            .by_index(i)
+            .map_err(|e| UErr::ZIP(dent.path().to_owned(), e))?;
         f.read_to_end(&mut buf)?;
         refs.extend(
             STORE_RE
@@ -132,7 +132,7 @@ fn scan_zip_archive(dent: &DirEntry) -> Result<ScanResult> {
     })
 }
 
-fn scan_symlink(dent: &DirEntry) -> Result<ScanResult> {
+fn scan_symlink(dent: &DirEntry) -> AResult<ScanResult> {
     debug!("scanning {}", dent.path().display());
     let meta = dent.metadata()?;
     let target = fs::read_link(dent.path())?;
@@ -156,7 +156,7 @@ impl Scanner {
     /// Scans a thing that has a file type.
     ///
     /// Returns Some(result) if a scan strategy was found, None otherwise.
-    fn scan_inode(&self, dent: &DirEntry, ft: fs::FileType) -> Option<Result<ScanResult>> {
+    fn scan_inode(&self, dent: &DirEntry, ft: fs::FileType) -> Option<AResult<ScanResult>> {
         if ft.is_file() {
             if !self.unzip.is_empty() {
                 if let Match::Whitelist(_) = self.unzip.matched(dent.path(), false) {
@@ -172,23 +172,21 @@ impl Scanner {
     }
 
     /// Scans anything. Returns an empty result if the dent is not scannable.
-    fn scan(&self, dent: &DirEntry) -> Result<ScanResult> {
+    fn scan(&self, dent: &DirEntry) -> AResult<ScanResult> {
         match dent.error() {
-            Some(e) if !e.is_partial() => {
-                return Err(format!("{}: {}", p2s(dent.path()), e.description()).into())
-            }
+            Some(e) if !e.is_partial() => return Err(anyhow!("{}: {}", p2s(dent.path()), e)),
             _ => (),
         }
         if let Some(ft) = dent.file_type() {
             if let Some(res) = self.scan_inode(dent, ft) {
-                return res.chain_err(|| format!("{}: scan failed", p2s(dent.path())));
+                return res.with_context(|| format!("{}: scan failed", p2s(dent.path())));
             }
         }
         // fall-through: no idea how to handle this DirEntry
-        Err(ErrorKind::FiletypeUnknown(dent.path().to_path_buf()).into())
+        Err(UErr::FiletypeUnknown(dent.path().to_owned()).into())
     }
 
-    pub fn find_paths(&self, dent: DirEntry) -> Result<StorePaths> {
+    pub fn find_paths(&self, dent: DirEntry) -> AResult<StorePaths> {
         self.scan(&dent).map(|mut r| {
             r.refs.sort();
             r.refs.dedup();
