@@ -198,9 +198,9 @@ impl Scanner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::{assert_eq_vecs, dent, FIXTURES};
     use ignore::overrides::OverrideBuilder;
     use std::path::Path;
-    use tests::{assert_eq_vecs, dent, FIXTURES};
 
     #[test]
     fn should_not_look_further_than_quickcheck() {

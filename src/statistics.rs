@@ -214,6 +214,7 @@ impl Statistics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::assert_eq_vecs;
 
     fn _msg_read(bytes: u64, ext: &str) -> StatsMsg {
         StatsMsg::Scan(File {

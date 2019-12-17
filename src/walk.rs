@@ -117,17 +117,17 @@ pub fn spawn_threads(app: &App, gcroots: &mut dyn Register) -> Result<Statistics
 
 #[cfg(test)]
 mod tests {
-    extern crate tempdir;
-
-    use self::tempdir::TempDir;
     use super::*;
+    use crate::registry;
+    use crate::registry::tests::fake_gc;
+    use crate::tests::{app, assert_eq_vecs, FIXTURES};
+
     use ignore::WalkBuilder;
-    use registry;
     use std::fs::{create_dir, set_permissions, File, Permissions};
     use std::io::Write;
     use std::os::unix::fs::{symlink, PermissionsExt};
     use std::path::{Path, PathBuf};
-    use tests::{app, assert_eq_vecs, fake_gc, FIXTURES};
+    use tempdir::TempDir;
     use users::mock::{MockUsers, User};
     use users::os::unix::UserExt;
 
@@ -275,7 +275,7 @@ mod tests {
 
         let walker = app
             .walker()
-            .and_then(|wb| ::add_dotexclude(wb, &users))
+            .and_then(|wb| crate::add_dotexclude(wb, &users))
             .unwrap();
         assert_eq!(
             vec!["", ".userscan-ignore", "file1"]

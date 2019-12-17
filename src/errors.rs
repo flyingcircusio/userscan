@@ -29,12 +29,8 @@ pub enum UErr {
     Create(PathBuf, #[source] io::Error),
     #[error("Failed to remove '{0}'")]
     Remove(PathBuf, #[source] io::Error),
-    #[error("Failed to read '{0}'")]
-    Read(PathBuf, #[source] io::Error),
     #[error("Failed to read link '{0}'")]
     ReadLink(PathBuf, #[source] io::Error),
-    #[error("Failed to open '{0}'")]
-    Open(PathBuf, #[source] io::Error),
     #[error("Failed to determine current directory")]
     CWD(#[source] io::Error),
     #[error("Failed to load cache from '{0}'")]

@@ -128,7 +128,7 @@ mod tests {
     extern crate tempdir;
     use self::tempdir::TempDir;
     use super::*;
-    use tests::FIXTURES;
+    use crate::tests::FIXTURES;
 
     #[test]
     fn cacheline_should_compare_regardless_of_used_flag() {
@@ -168,7 +168,7 @@ mod tests {
         let filename = tempdir.path().join("cache");
         {
             let mut f = open_locked(&filename).unwrap();
-            assert!(dummy_cachemap().save(&mut f, &filename).is_ok());
+            assert!(dummy_cachemap().save(&mut f).is_ok());
         }
         assert!(fs::metadata(&filename).unwrap().len() > 0);
     }

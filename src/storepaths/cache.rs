@@ -168,8 +168,8 @@ mod tests {
     use self::tempdir::TempDir;
     use super::Lookup::*;
     use super::*;
+    use crate::tests::{dent, FIXTURES};
     use std::fs;
-    use tests::{dent, FIXTURES};
 
     fn sp_dummy() -> StorePaths {
         let dent = tests::dent("dir2/lftp");

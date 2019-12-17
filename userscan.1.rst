@@ -1,5 +1,4 @@
 :title: fc-userscan
-:title_upper: FC-USERSCAN
 :subtitle: Scans directories and registers for Nix store references
 :manual_section: 1
 :copyright: Flying Circus Internet Operations GmbH and contributors
@@ -82,9 +81,6 @@ OPTIONS
 **--statistics**, **--stats**, **-S**
     Prints scanned files and read bytes per file type at the end of the run.
     This may help to fine-tune exclude lists.
-
-**--stutter**, **-s** *SLEEPTIME*
-    Pauses *SLEEPTIME* milliseconds after each opened file to lower I/O impact.
 
 **--unzip**, **-z** *GLOB[,GLOB...]*
     Unpacks files matching GLOB as ZIP archives and scans all contained

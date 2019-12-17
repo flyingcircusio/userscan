@@ -189,9 +189,7 @@ struct Opt {
     /// to get both listing and registration.
     #[structopt(short, long, display_order(1))]
     list: bool,
-    /// Registers references even when in list mode
-    ///
-    /// Registration is enabled by default if -l/--list not given
+    /// Registers references (enabled by default if --list if not given)
     #[structopt(short, long, display_order(2))]
     register: bool,
     /// Keeps results between runs in FILE
@@ -230,7 +228,8 @@ struct Opt {
     /// Gives up if no Nix store references are found in the first SIZE kilobytes of a file.
     /// Assumes that at least one Nix store reference is located near the beginning. Speeds up
     /// scanning large files considerably.
-    #[structopt(short, long, default_value = "512", value_name = "SIZE", parse(try_from_str = parse_kb))]
+    #[structopt(short, long, default_value = "512", value_name = "SIZE",
+                parse(try_from_str = parse_kb))]
     quickcheck: ByteSize,
     /// Skips files matching GLOB
     ///
@@ -304,11 +303,5 @@ pub mod test {
         let a = app(&["--list", "--register"]);
         assert!(a.output.list);
         assert!(a.register);
-    }
-
-    #[test]
-    fn sleep_value_in_ms() {
-        let a = app(&["--stutter=50"]);
-        assert_eq!(a.opt.sleep.unwrap(), Duration::from_millis(50));
     }
 }

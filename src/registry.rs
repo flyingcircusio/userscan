@@ -53,7 +53,7 @@ impl GCRoots {
             None => return Err(UErr::WhoAmI),
         };
         let prefix = Path::new(peruser).join(&user);
-        let cwd = env::current_dir().map_err(|e| UErr::CWD(e))?;
+        let cwd = env::current_dir().map_err(UErr::CWD)?;
         Ok(GCRoots {
             topdir: prefix.join(
                 startdir
@@ -229,10 +229,9 @@ impl Register for NullGCRoots {
 
 #[cfg(test)]
 pub mod tests {
-    extern crate tempdir;
-
-    use self::tempdir::TempDir;
     use super::*;
+    use crate::tests::FIXTURES;
+    use tempdir::TempDir;
 
     fn _gcroots() -> (TempDir, GCRoots) {
         let tempdir = TempDir::new("gcroots").expect("failed to create gcroots tempdir");
@@ -325,6 +324,10 @@ pub mod tests {
                 rx: None,
             }
         }
+    }
+
+    pub fn fake_gc() -> FakeGCRoots {
+        FakeGCRoots::new(&*FIXTURES)
     }
 
     impl Register for FakeGCRoots {
