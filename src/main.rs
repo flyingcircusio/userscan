@@ -90,7 +90,17 @@ impl App {
         for glob in &self.opt.unzip {
             ob.add(glob)?;
         }
-        Ok(scan::Scanner::new(self.opt.quickcheck, ob.build()?))
+        let baseline = probes::load::read()?.fifteen;
+        let max_load = match self.opt.load_increase {
+            inc if inc <= 0.0 => 0.0,
+            inc => baseline + inc * num_cpus::get() as f32,
+        };
+        debug!("Baseline load: {}, limit: {}", baseline, max_load);
+        Ok(scan::Scanner::new(
+            self.opt.quickcheck,
+            ob.build()?,
+            max_load,
+        ))
     }
 
     fn gcroots(&self) -> Result<Box<dyn Register>> {
@@ -150,7 +160,6 @@ impl From<Opt> for App {
         overrides.extend(opt.exclude.iter().map(|e| format!("!{}", e)));
         overrides.extend(opt.include.iter().map(|i| i.to_owned()));
         let register = opt.register || !opt.list;
-
         App {
             opt,
             output,
@@ -259,6 +268,17 @@ struct Opt {
     /// comma-separated list of glob patterns [example: *.zip,*.egg].
     #[structopt(short, long, use_delimiter(true))]
     unzip: Vec<String>,
+    /// Pauses scanning if the current load1 goes over load15+L
+    ///
+    /// The baseline is determined at program startup. If there are multiple CPUs present,
+    /// the increase is granted per CPU. Use '0.0' to disable.
+    #[structopt(
+        short = "p",
+        long = "pause-load",
+        default_value = "0.5",
+        value_name = "L"
+    )]
+    load_increase: f32,
 }
 
 fn main() {

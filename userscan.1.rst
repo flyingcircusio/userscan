@@ -67,6 +67,11 @@ OPTIONS
     same line. Automatic post-processing may be easier using this format.
     If not given, the file and its references are printed on separate line.
 
+**--pause-load**, **-p** *L*
+    Pauses scanning if the current load1 goes over load15+L. The baseline is
+    determined at program startup. If there are multiple CPUs present, the
+    increase is granted per CPU. Use **0.0** to disable.
+
 **--quickcheck**, **-q** *SIZE*
     Improves performance for large files: if no single Nix store reference is
     present in the first *SIZE* kilobytes of a file, the rest of the file is

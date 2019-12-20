@@ -44,10 +44,7 @@ impl ProcessingContext {
     fn scan_entry(&self, dent: DirEntry) -> Result<WalkState> {
         let mut sp = match self.cache.lookup(dent) {
             Lookup::Dir(sp) | Lookup::Hit(sp) => sp,
-            Lookup::Miss(d) => {
-                // XXX new stutter logic
-                self.scanner.find_paths(d)?
-            }
+            Lookup::Miss(d) => self.scanner.find_paths(d)?,
         };
         if let Some(err) = sp.error() {
             if err.is_partial() {

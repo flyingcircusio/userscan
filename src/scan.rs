@@ -8,12 +8,15 @@ use bytesize::ByteSize;
 use ignore::overrides::Override;
 use ignore::{DirEntry, Match};
 use memmap::Mmap;
+use probes::load;
 use regex::bytes::Regex;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::Read;
 use std::os::unix::prelude::*;
 use std::path::PathBuf;
+use std::thread::sleep;
+use std::time::Duration;
 use zip::read::ZipArchive;
 
 lazy_static! {
@@ -35,6 +38,8 @@ pub struct Scanner {
     quickcheck: ByteSize,
     /// Unzips files matched by the given globs and scans inside.
     unzip: Override,
+    /// Pauses scanning if the current load1 is higher than this
+    max_load: f32,
 }
 
 impl Default for Scanner {
@@ -42,6 +47,7 @@ impl Default for Scanner {
         Scanner {
             quickcheck: ByteSize::b(0),
             unzip: Override::empty(),
+            max_load: 0.0,
         }
     }
 }
@@ -145,8 +151,12 @@ fn scan_symlink(dent: &DirEntry) -> AResult<ScanResult> {
 }
 
 impl Scanner {
-    pub fn new(quickcheck: ByteSize, unzip: Override) -> Self {
-        Scanner { quickcheck, unzip }
+    pub fn new(quickcheck: ByteSize, unzip: Override, max_load: f32) -> Self {
+        Scanner {
+            quickcheck,
+            unzip,
+            max_load,
+        }
     }
 
     /// Scans a thing that has a file type.
@@ -185,8 +195,26 @@ impl Scanner {
         Err(UErr::FiletypeUnknown(dent.path().to_owned()).into())
     }
 
+    fn pause_for_load(&self) {
+        let mut backoff = Duration::new(1, 0);
+        loop {
+            let l1 = load::read().expect("determine system load").one;
+            if l1 <= self.max_load {
+                return;
+            }
+            debug!("Pausing until load {} is below {}", l1, self.max_load);
+            sleep(backoff);
+            if backoff.as_secs() < 30 {
+                backoff = backoff.mul_f32(1.1);
+            }
+        }
+    }
+
     /// Scans `dent` and transforms results into a StorePaths object.
     pub fn find_paths(&self, dent: DirEntry) -> AResult<StorePaths> {
+        if self.max_load > 0.0 {
+            self.pause_for_load();
+        }
         self.scan(&dent).map(|mut r| {
             r.refs.sort();
             r.refs.dedup();
@@ -238,7 +266,7 @@ mod tests {
             .unwrap()
             .build()
             .unwrap();
-        let sp = Scanner::new(ByteSize::default(), unzip)
+        let sp = Scanner::new(ByteSize::default(), unzip, 0.0)
             .find_paths(dent("miniegg-1-py3.5.egg"))
             .unwrap();
         assert_eq!(
