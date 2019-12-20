@@ -2,8 +2,8 @@ use crate::errors::*;
 use crate::output::p2s;
 use crate::storepaths::StorePaths;
 
+use anyhow::Context;
 use anyhow::Result as AResult;
-use anyhow::{anyhow, Context};
 use bytesize::ByteSize;
 use ignore::overrides::Override;
 use ignore::{DirEntry, Match};
@@ -15,7 +15,6 @@ use std::io::Read;
 use std::os::unix::prelude::*;
 use std::path::PathBuf;
 use zip::read::ZipArchive;
-use zip::result::ZipError;
 
 lazy_static! {
     static ref STORE_RE: Regex =
@@ -47,12 +46,15 @@ impl Default for Scanner {
     }
 }
 
+/// Scans a regular file.
+///
+/// Only the first `quickcheck` bytes are considered. The whole file is read if `quickcheck` is 0.
 fn scan_regular_quickcheck(
     dent: &DirEntry,
     meta: fs::Metadata,
     quickcheck: u64,
 ) -> AResult<ScanResult> {
-    debug!("scanning {}", dent.path().display());
+    debug!("Scanning {}", dent.path().display());
     let mmap = unsafe { Mmap::map(&fs::File::open(dent.path())?)? };
     if quickcheck > 0
         && meta.len() > quickcheck
@@ -90,19 +92,12 @@ fn scan_regular(dent: &DirEntry, quickcheck: ByteSize) -> AResult<ScanResult> {
     }
 }
 
+/// Unpacks a ZIP archive on the fly and scans its contents.
 fn scan_zip_archive(dent: &DirEntry) -> AResult<ScanResult> {
     debug!("Scanning ZIP archive {}", dent.path().display());
     let meta = dent.metadata()?;
     let mut archive = match ZipArchive::new(fs::File::open(&dent.path())?) {
         Ok(a) => a,
-        Err(ZipError::InvalidArchive(e)) | Err(ZipError::UnsupportedArchive(e)) => {
-            warn!(
-                "{}: failed to unpack ZIP archive: {}",
-                dent.path().display(),
-                e
-            );
-            return scan_regular_quickcheck(dent, meta, 0);
-        }
         Err(e) => return Err(UErr::ZIP(dent.path().to_owned(), e).into()),
     };
     let mut buf = Vec::new();
@@ -132,8 +127,9 @@ fn scan_zip_archive(dent: &DirEntry) -> AResult<ScanResult> {
     })
 }
 
+/// Scans the symlink's target name (i.e., readlink() output).
 fn scan_symlink(dent: &DirEntry) -> AResult<ScanResult> {
-    debug!("scanning {}", dent.path().display());
+    debug!("Scanning link {}", dent.path().display());
     let meta = dent.metadata()?;
     let target = fs::read_link(dent.path())?;
     let len = target.as_os_str().len() as u64;
@@ -171,10 +167,13 @@ impl Scanner {
         None
     }
 
-    /// Scans anything. Returns an empty result if the dent is not scannable.
+    /// Decodes the DirEntry and scans it if feasible.
     fn scan(&self, dent: &DirEntry) -> AResult<ScanResult> {
         match dent.error() {
-            Some(e) if !e.is_partial() => return Err(anyhow!("{}: {}", p2s(dent.path()), e)),
+            Some(e) if !e.is_partial() => {
+                return Err(e.clone())
+                    .with_context(|| format!("{}: metadata error", p2s(dent.path())))
+            }
             _ => (),
         }
         if let Some(ft) = dent.file_type() {
@@ -186,6 +185,7 @@ impl Scanner {
         Err(UErr::FiletypeUnknown(dent.path().to_owned()).into())
     }
 
+    /// Scans `dent` and transforms results into a StorePaths object.
     pub fn find_paths(&self, dent: DirEntry) -> AResult<StorePaths> {
         self.scan(&dent).map(|mut r| {
             r.refs.sort();
@@ -246,21 +246,5 @@ mod tests {
             *sp.refs()
         );
         assert_eq!(2226, sp.bytes_scanned());
-    }
-
-    #[test]
-    fn fallback_to_regular_scan_if_invalid_zip() {
-        let unzip = OverrideBuilder::new(&*FIXTURES)
-            .add("*")
-            .unwrap()
-            .build()
-            .unwrap();
-        let sp = Scanner::new(ByteSize::default(), unzip)
-            .find_paths(dent("dir2/lftp"))
-            .expect("mask ZIP error");
-        assert_eq!(
-            vec![Path::new("q3wx1gab2ysnk5nyvyyg56ana2v4r2ar-glibc-2.24")],
-            *sp.refs()
-        );
     }
 }

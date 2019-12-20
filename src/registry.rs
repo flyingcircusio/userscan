@@ -100,8 +100,7 @@ impl GCRoots {
                     self.seen.insert(linkname);
                     Ok(0)
                 } else {
-                    fs::remove_file(&linkname)
-                        .map_err(|e| UErr::Remove(linkname.to_owned(), e))?;
+                    fs::remove_file(&linkname).map_err(|e| UErr::Remove(linkname.to_owned(), e))?;
                     self.create_link(dir.as_ref(), linkname, &target)
                 }
             }
@@ -337,11 +336,8 @@ pub mod tests {
                     for storepaths in rx {
                         for r in storepaths.refs() {
                             let relpath = storepaths.path().strip_prefix(&self.prefix).unwrap();
-                            self.registered.push(format!(
-                                "{}|{}",
-                                relpath.display(),
-                                r.display()
-                            ));
+                            self.registered
+                                .push(format!("{}|{}", relpath.display(), r.display()));
                         }
                     }
                     Ok(())

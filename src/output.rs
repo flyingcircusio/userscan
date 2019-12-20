@@ -47,6 +47,7 @@ impl Output {
         }
     }
 
+    /// Sets up logging with colored output if requested.
     pub fn log_init(&self) {
         colored::control::set_override(self.color);
         Builder::new()
@@ -54,9 +55,7 @@ impl Output {
                 Level::Error => {
                     writeln!(buf, "{}: {}", r.level().to_string().red().bold(), r.args())
                 }
-                Level::Warn => {
-                    writeln!(buf, "{}: {}", r.level().to_string().yellow(), r.args())
-                }
+                Level::Warn => writeln!(buf, "{}: {}", r.level().to_string().yellow(), r.args()),
                 Level::Info => writeln!(buf, "{}", r.args()),
                 _ => writeln!(buf, "{}", r.args().to_string().blue()),
             })

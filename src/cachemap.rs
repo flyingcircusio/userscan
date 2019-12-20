@@ -1,3 +1,4 @@
+//! Persistent HashMap used for caching previous scan results.
 use crate::output::p2s;
 
 use fnv::FnvHashMap;
@@ -39,9 +40,7 @@ pub struct CacheLine {
 
 impl PartialEq for CacheLine {
     fn eq(&self, other: &CacheLine) -> bool {
-        self.ctime == other.ctime
-            && self.ctime_nsec == other.ctime_nsec
-            && self.refs == other.refs
+        self.ctime == other.ctime && self.ctime_nsec == other.ctime_nsec && self.refs == other.refs
     }
 }
 

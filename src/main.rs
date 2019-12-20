@@ -1,4 +1,3 @@
-// TODO --ignore-warnings option
 #![recursion_limit = "256"]
 
 #[macro_use]
