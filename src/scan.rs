@@ -205,7 +205,7 @@ impl Scanner {
             debug!("Pausing until load {} is below {}", l1, self.max_load);
             sleep(backoff);
             if backoff.as_secs() < 30 {
-                backoff = backoff.mul_f32(1.1);
+                backoff = backoff * 11 / 10;
             }
         }
     }

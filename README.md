@@ -62,7 +62,7 @@ location, the registration will be cleaned up by the next run.
 
 ## Hacking
 
-`fc-userscan` compiles on Rust 1.37.0 or higher. I'll happily accect pull
+`fc-userscan` compiles with Rust 1.37.0 or higher. I'll happily accect pull
 requests at the [GitHub repository](https://github.com/flyingcircusio/userscan).
 Please write tests if feasible.
 
