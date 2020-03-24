@@ -10,6 +10,7 @@ use crate::App;
 
 use anyhow::{Context, Result};
 use ignore::{self, DirEntry, WalkParallel, WalkState};
+use nix::unistd::seteuid;
 use std::io::{self, ErrorKind};
 use std::os::unix::fs::MetadataExt;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -105,21 +106,23 @@ impl ProcessingContext {
 /// Creates threads, starts parallel scanning and collects results.
 pub fn spawn_threads(app: &App, gcroots: &mut dyn Register) -> Result<Statistics> {
     let mut stats = app.statistics();
-    let mut cache = crossbeam::scope(|threads| -> Result<Arc<Cache>> {
+    let mut cache = crossbeam::scope(|sc| -> Result<Arc<Cache>> {
         let pctx = ProcessingContext::create(app, &mut stats, gcroots)?;
         let walker = app.walker()?.build_parallel();
         info!("{}: Scouting {}", crate_name!(), p2s(&app.opt.startdir));
-        let walk_hdl = threads.spawn(|_| pctx.walk(walker));
-        threads.spawn(|_| stats.receive_loop());
+        let walk_hdl = sc.spawn(|_| pctx.walk(walker));
+        sc.spawn(|_| stats.receive_loop());
         gcroots.register_loop()?;
         walk_hdl.join().expect("subthread panic")
     })
     .expect("thread panic")?;
     if app.register {
-        gcroots.clean()?;
+        gcroots.commit()?;
+        // no privileges needed from this point on
+        seteuid(app.uid)?;
         // don't touch cache if in no-register mode
         Arc::get_mut(&mut cache)
-            .expect("BUG: dangling references to cache")
+            .expect("dangling cache references (all threads terminated?)")
             .commit()?;
         cache.log_statistics();
     }

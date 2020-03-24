@@ -62,8 +62,13 @@ location, the registration will be cleaned up by the next run.
 
 ## Hacking
 
-`fc-userscan` compiles with Rust 1.37.0 or higher. I'll happily accect pull
-requests at the [GitHub repository](https://github.com/flyingcircusio/userscan).
+`fc-userscan` compiles with Rust 1.39.0 or higher.
+
+To conveniently build setuid executables, install `cargo-make` and run `cargo
+make suid`.
+
+I'll happily accect pull requests at the [GitHub
+repository](https://github.com/flyingcircusio/userscan).
 Please write tests if feasible.
 
 ## Contact

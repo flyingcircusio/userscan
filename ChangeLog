@@ -1,3 +1,7 @@
+2020-03-24  Christian Kauhaus <kc@flyingcircus.io>
+
+	* Behave correctly when invoked as setuid root binary
+
 2019-03-28  Christian Kauhaus <kc@flyingcircus.io>
 
 	* Adapt GC_PREFIX to newer NixOS versions.

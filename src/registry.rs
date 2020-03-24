@@ -37,12 +37,15 @@ pub struct GCRoots {
 
 /// IPC endpoint for garbage collection roots registry
 pub trait Register {
+    /// Receives stream of store paths via the `rx` channel. Returns on channel close.
     fn register_loop(&mut self) -> Result<()>;
 
-    fn clean(&self) -> Result<()> {
+    /// Creates links for all registered store paths and cleans up unused ones.
+    fn commit(&self) -> Result<()> {
         Ok(())
     }
 
+    /// Returns sending end of the GCRoot channel.
     fn tx(&mut self) -> GCRootsTx;
 }
 
@@ -162,7 +165,8 @@ impl Register for GCRoots {
             Some(rx) => {
                 self.registered = rx
                     .iter()
-                    .map(|sp| self.register(&sp))
+                    //.map(|_| Ok(1))
+                    .map(|sp| self.register(&sp)) // XXX
                     .sum::<Result<usize>>()?;
                 Ok(())
             }
@@ -170,7 +174,7 @@ impl Register for GCRoots {
         }
     }
 
-    fn clean(&self) -> Result<()> {
+    fn commit(&self) -> Result<()> {
         let cleaned = self.cleanup()?;
         info!(
             "{} references in {}",
@@ -303,6 +307,8 @@ pub mod tests {
         gc.topdir = td.path().join("no/such/dir");
         assert_eq!(gc.cleanup().expect("unexpected cleanup failure"), 0);
     }
+
+    // XXX missing: test that commit() actually creates symlinks
 
     /*
      * passive GCRoots consumer to test walker/scanner

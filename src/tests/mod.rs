@@ -5,9 +5,6 @@ use super::*;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-#[cfg(feature = "profile")]
-mod profile;
-
 lazy_static! {
     pub static ref FIXTURES: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures");
 }

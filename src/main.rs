@@ -25,6 +25,7 @@ use bytesize::ByteSize;
 use errors::UErr;
 use ignore::overrides::OverrideBuilder;
 use ignore::WalkBuilder;
+use nix::unistd::{geteuid, getuid, seteuid, Uid};
 use output::{p2s, Output};
 use registry::{GCRoots, NullGCRoots, Register};
 use statistics::Statistics;
@@ -53,12 +54,27 @@ fn add_dotexclude<U: users::Users>(mut wb: WalkBuilder, u: &U) -> Result<WalkBui
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct App {
     opt: Opt,
     output: Output,
     overrides: Vec<String>,
     register: bool,
+    uid: Uid,
+    euid: Uid,
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self {
+            opt: Opt::default(),
+            output: Output::default(),
+            overrides: Vec::default(),
+            register: false,
+            uid: getuid(),
+            euid: geteuid(),
+        }
+    }
 }
 
 impl App {
@@ -117,7 +133,13 @@ impl App {
 
     fn cache(&self) -> Result<Cache> {
         match self.opt.cache {
-            Some(ref f) => Ok(Cache::new(self.opt.cache_limit).open(f)?),
+            Some(ref f) => {
+                // drop privileges before opening the cache
+                seteuid(self.uid)?;
+                let cache = Cache::new(self.opt.cache_limit).open(f)?;
+                seteuid(self.euid)?;
+                Ok(cache)
+            }
             None => Ok(Cache::new(self.opt.cache_limit)),
         }
     }
@@ -165,6 +187,7 @@ impl From<Opt> for App {
             output,
             overrides,
             register,
+            ..Self::default()
         }
     }
 }

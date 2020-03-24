@@ -1,0 +1,11 @@
+# Simple `cargo make` file to convenniently build suid root executables for
+# local testing. Needs sudo.
+
+[tasks.suid]
+dependencies = ["build"]
+script = [
+  "sudo chown root: target/debug/fc-userscan",
+  "sudo chmod 4755 target/debug/fc-userscan"
+]
+
+# vim: set sw=2 sts=2 et:

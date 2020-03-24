@@ -9,6 +9,7 @@ use crate::errors::*;
 use crate::output::p2s;
 use colored::Colorize;
 use ignore::DirEntry;
+use nix::unistd::{geteuid, getuid};
 use std::fs;
 use std::os::unix::prelude::*;
 use std::path::{Path, PathBuf};
@@ -37,6 +38,10 @@ impl Cache {
     pub fn open<P: AsRef<Path>>(mut self, path: P) -> Result<Self> {
         self.filename = path.as_ref().to_path_buf();
         info!("Loading cache {}", p2s(&self.filename));
+        assert!(
+            geteuid() == getuid(),
+            "Refusing to open cache with elevated privileges"
+        );
         if let Some(p) = path.as_ref().parent() {
             fs::create_dir_all(p).map_err(|e| UErr::Create(p.to_owned(), e))?;
         }
@@ -62,6 +67,10 @@ impl Cache {
             if !self.dirty.compare_and_swap(true, false, Ordering::SeqCst) {
                 return Ok(());
             }
+            assert!(
+                geteuid() == getuid(),
+                "Refusing to write cache with elevated privileges"
+            );
             let mut map = self.map.write().expect("tainted lock");
             map.retain(|_, ref mut v| v.used);
             debug!("writing {} entries to cache", map.len());
