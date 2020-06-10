@@ -39,5 +39,8 @@ twoway = "0.1"
 users = "0.9"
 zip = "0.5"
 
+[patch.crates-io]
+probes = { git = "https://github.com/appsignal/probes-rs", rev = "84d9acfa8e80"}
+
 [dev-dependencies]
 tempdir = "0.3"
