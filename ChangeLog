@@ -1,3 +1,8 @@
+2020-06-10  Christian Kauhaus <kc@flyingcircus.io>
+
+	* Fix broken compile
+	* Release 0.4.5
+
 2020-03-24  Christian Kauhaus <kc@flyingcircus.io>
 
 	* Behave correctly when invoked as setuid root binary
