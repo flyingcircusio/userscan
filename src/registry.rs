@@ -21,10 +21,6 @@ use users::get_effective_username;
 pub type GCRootsTx = mpsc::Sender<StorePaths>;
 pub type GCRootsRx = mpsc::Receiver<StorePaths>;
 
-fn extract_hash(path: &Path) -> &[u8] {
-    &path.as_os_str().as_bytes()[..32]
-}
-
 #[derive(Debug, Default)]
 pub struct GCRoots {
     prefix: PathBuf, // /nix/var/nix/gcroots/profiles/per-user/$USER
@@ -71,6 +67,107 @@ impl GCRoots {
             ..GCRoots::default()
         })
     }
+}
+
+impl Register for GCRoots {
+    fn register_loop(&mut self) {
+        if let Some(rx) = self.rx.take() {
+            for sp in rx {
+                self.todo.push(sp)
+            }
+        }
+    }
+
+    fn commit(&mut self, ctx: &ExecutionContext) -> Result<()> {
+        ctx.with_dropped_privileges(|| {
+            let mut worker = RegistryWorker::new(&self.prefix, &self.cwd);
+            let cleaned = worker.cleanup(&self.topdir)?;
+            let registered = self
+                .todo
+                .iter()
+                .map(|sp| {
+                    self.output.print_store_paths(&sp);
+                    worker.register(sp)
+                })
+                .sum::<Result<usize>>()?;
+            info!(
+                "{} references in {}",
+                self.seen.len().to_string().cyan(),
+                p2s(&self.topdir)
+            );
+            if registered > 0 || cleaned > 0 {
+                info!(
+                    "newly registered: {}, cleaned: {}",
+                    registered.to_string().green(),
+                    cleaned.to_string().purple()
+                );
+            }
+            Ok(())
+        })
+    }
+
+    fn tx(&mut self) -> GCRootsTx {
+        let (tx, rx) = mpsc::channel::<StorePaths>();
+        self.rx = Some(rx);
+        tx
+    }
+}
+
+fn extract_hash(path: &Path) -> &[u8] {
+    &path.as_os_str().as_bytes()[..32]
+}
+
+#[derive(Debug)]
+pub struct RegistryWorker<'a> {
+    prefix: &'a Path,
+    cwd: &'a Path,
+    seen: HashSet<PathBuf>,
+}
+
+impl<'a> RegistryWorker<'a> {
+    /// `prefix` - e.g. /nix/var/nix/gcroots/profiles/per-user/$USER
+    /// `cwd` - directory where the scan was started
+    fn new(prefix: &'a Path, cwd: &'a Path) -> Self {
+        Self {
+            prefix,
+            cwd,
+            seen: HashSet::new(),
+        }
+    }
+
+    /// Removes dangling symlinks below `topdir`
+    fn cleanup(&self, topdir: &Path) -> Result<usize> {
+        if !topdir.exists() {
+            return Ok(0);
+        }
+        WalkBuilder::new(topdir)
+            .hidden(false)
+            .ignore(false)
+            .build()
+            .map(|res: result::Result<DirEntry, ignore::Error>| {
+                let dent = res?;
+                let path = dent.path();
+                match dent.file_type() {
+                    Some(ft) if ft.is_dir() => {
+                        if fs::remove_dir(path).is_ok() {
+                            debug!("removing empty dir {}", path.display())
+                        }
+                        Ok(0)
+                    }
+                    Some(ft) if ft.is_symlink() => {
+                        if self.seen.contains(path) {
+                            Ok(0)
+                        } else {
+                            info!("removing link {}", p2s(&path));
+                            fs::remove_file(path)?;
+                            Ok(1)
+                        }
+                    }
+                    _ => Ok(0),
+                }
+            })
+            .sum()
+    }
 
     /// Determines exactly where a GC link should live.
     fn gc_link_dir<P: AsRef<Path>>(&self, scanned: P) -> PathBuf {
@@ -116,87 +213,9 @@ impl GCRoots {
     }
 
     /// Registers all Nix store paths with the garbage collector.
-    fn register(&mut self, sp: StorePaths) -> Result<usize> {
-        self.output.print_store_paths(&sp);
+    fn register(&mut self, sp: &StorePaths) -> Result<usize> {
         let dir = self.gc_link_dir(sp.path());
         sp.iter_refs().map(|p| self.link(dir.as_path(), p)).sum()
-    }
-
-    fn cleanup(&self) -> Result<usize> {
-        if !self.topdir.exists() {
-            return Ok(0);
-        }
-        WalkBuilder::new(&self.topdir)
-            .git_exclude(false)
-            .git_global(false)
-            .git_ignore(false)
-            .hidden(false)
-            .ignore(false)
-            .parents(false)
-            .build()
-            .map(|res: result::Result<DirEntry, ignore::Error>| {
-                let dent = res?;
-                let path = dent.path();
-                match dent.file_type() {
-                    Some(ft) if ft.is_dir() => {
-                        if fs::remove_dir(path).is_ok() {
-                            debug!("removing empty dir {}", path.display())
-                        }
-                        Ok(0)
-                    }
-                    Some(ft) if ft.is_symlink() => {
-                        if self.seen.contains(path) {
-                            Ok(0)
-                        } else {
-                            info!("removing link {}", p2s(&path));
-                            fs::remove_file(path)?;
-                            Ok(1)
-                        }
-                    }
-                    _ => Ok(0),
-                }
-            })
-            .sum()
-    }
-}
-
-impl Register for GCRoots {
-    fn register_loop(&mut self) {
-        if let Some(rx) = self.rx.take() {
-            for sp in rx {
-                self.todo.push(sp)
-            }
-        }
-    }
-
-    fn commit(&mut self, ctx: &ExecutionContext) -> Result<()> {
-        ctx.with_dropped_privileges(|| {
-            let cleaned = self.cleanup()?;
-            let todo = self.todo.split_off(0);
-            let registered = todo
-                .into_iter()
-                .map(|sp| self.register(sp))
-                .sum::<Result<usize>>()?;
-            info!(
-                "{} references in {}",
-                self.seen.len().to_string().cyan(),
-                p2s(&self.topdir)
-            );
-            if registered > 0 || cleaned > 0 {
-                info!(
-                    "newly registered: {}, cleaned: {}",
-                    registered.to_string().green(),
-                    cleaned.to_string().purple()
-                );
-            }
-            Ok(())
-        })
-    }
-
-    fn tx(&mut self) -> GCRootsTx {
-        let (tx, rx) = mpsc::channel::<StorePaths>();
-        self.rx = Some(rx);
-        tx
     }
 }
 
@@ -247,6 +266,10 @@ pub mod tests {
         (tempdir, gc)
     }
 
+    fn _worker(tempdir: &TempDir) -> RegistryWorker {
+        RegistryWorker::new(tempdir.path(), Path::new("/home/user"))
+    }
+
     fn is_symlink(p: &Path) -> bool {
         fs::symlink_metadata(p)
             .expect(&format!("symlink {} does not exist", p.display()))
@@ -256,33 +279,36 @@ pub mod tests {
 
     #[test]
     fn linkdir() {
-        let (td, gc) = _gcroots();
-        assert_eq!(td.path().join("home/user"), gc.gc_link_dir("file2"));
+        let td = TempDir::new("linkdir").unwrap();
+        let w = _worker(&td);
+        assert_eq!(td.path().join("home/user"), w.gc_link_dir("file2"));
         assert_eq!(
             td.path().join("home/user/www/d"),
-            gc.gc_link_dir("/home/user/www/d/file1")
+            w.gc_link_dir("/home/user/www/d/file1")
         );
-        assert_eq!(td.path().join("home/user/rel"), gc.gc_link_dir("rel/file3"));
+        assert_eq!(td.path().join("home/user/rel"), w.gc_link_dir("rel/file3"));
     }
 
     #[test]
     fn should_create_link() {
-        let (td, mut gc) = _gcroots();
+        let td = TempDir::new("createlink").unwrap();
+        let mut w = _worker(&td);
         let storepath = Path::new("gmy86w4020xzjw9s8qzzz0bgx8ldkhhk-e34kjk");
         let expected = td.path().join("gmy86w4020xzjw9s8qzzz0bgx8ldkhhk");
-        assert_eq!(gc.link(td.path(), storepath).expect("link 1 failed"), 1);
+        assert_eq!(w.link(td.path(), storepath).expect("link 1 failed"), 1);
         assert!(is_symlink(&expected));
-        assert!(gc.seen.contains(&expected));
+        assert!(w.seen.contains(&expected));
         // second attempt: do nothing
-        assert_eq!(gc.link(td.path(), storepath).expect("link 2 failed"), 0);
+        assert_eq!(w.link(td.path(), storepath).expect("link 2 failed"), 0);
     }
 
     #[test]
     fn create_link_should_create_dir() {
-        let (td, mut gc) = _gcroots();
+        let td = TempDir::new("createdir").unwrap();
+        let mut w = _worker(&td);
         assert!(fs::metadata(td.path().join("d1")).is_err());
         assert_eq!(
-            gc.link(td.path().join("d1"), "gmy86w4020xzjw9s8qzzz0bgx8ldkhhk-e")
+            w.link(td.path().join("d1"), "gmy86w4020xzjw9s8qzzz0bgx8ldkhhk-e")
                 .unwrap(),
             1
         );
@@ -293,10 +319,12 @@ pub mod tests {
 
     #[test]
     fn create_link_should_correct_existing_link() {
-        let (td, mut gc) = _gcroots();
+        let td = TempDir::new("correctlink").unwrap();
+        let mut w = _worker(&td);
         let link = td.path().join("f0vdg3cb0005ksjb0fd5qs6f56zg2qs5");
         symlink("changeme", &link).unwrap();
-        let _ = gc.link(td.path(), "f0vdg3cb0005ksjb0fd5qs6f56zg2qs5-v");
+        w.link(td.path(), "f0vdg3cb0005ksjb0fd5qs6f56zg2qs5-v")
+            .unwrap();
         assert_eq!(
             PathBuf::from("/nix/store/f0vdg3cb0005ksjb0fd5qs6f56zg2qs5-v"),
             fs::read_link(&link).unwrap()
@@ -305,9 +333,9 @@ pub mod tests {
 
     #[test]
     fn cleanup_nonexistent_dir_should_succeed() {
-        let (td, mut gc) = _gcroots();
-        gc.topdir = td.path().join("no/such/dir");
-        assert_eq!(gc.cleanup().expect("unexpected cleanup failure"), 0);
+        let td = TempDir::new("cleanup").unwrap();
+        let w = _worker(&td);
+        assert_eq!(w.cleanup(&td.path().join("no/such/dir")).unwrap(), 0);
     }
 
     #[test]
