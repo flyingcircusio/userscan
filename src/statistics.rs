@@ -9,6 +9,7 @@ use std::hash::Hash;
 use std::ops::{Add, AddAssign};
 use std::path::Path;
 use std::sync::mpsc;
+use std::sync::mpsc::channel;
 use std::time;
 
 pub type StatsTx = mpsc::Sender<StatsMsg>;
@@ -159,7 +160,7 @@ impl Statistics {
     }
 
     pub fn tx(&mut self) -> StatsTx {
-        let (tx, rx) = mpsc::channel::<StatsMsg>();
+        let (tx, rx) = channel::<StatsMsg>();
         self.rx = Some(rx);
         tx
     }

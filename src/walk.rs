@@ -5,7 +5,7 @@ use crate::output::p2s;
 use crate::registry::{GCRootsTx, Register};
 use crate::scan::Scanner;
 use crate::statistics::{Statistics, StatsMsg, StatsTx};
-use crate::storepaths::{Cache, Lookup};
+use crate::storepaths::{Cache, Lookup, StorePaths};
 use crate::App;
 
 use anyhow::{Context, Result};
@@ -13,6 +13,7 @@ use ignore::{self, DirEntry, WalkParallel, WalkState};
 use std::io::{self, ErrorKind};
 use std::os::unix::fs::MetadataExt;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::channel;
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -26,13 +27,13 @@ struct ProcessingContext {
 }
 
 impl ProcessingContext {
-    fn create(app: &App, stats: &mut Statistics, gcroots: &mut dyn Register) -> Result<Self> {
+    fn create(app: &App, stats: &mut Statistics, gc: GCRootsTx) -> Result<Self> {
         Ok(Self {
             startdev: app.start_meta()?.dev(),
             cache: Arc::new(app.cache()?),
             scanner: Arc::new(app.scanner()?),
             stats: stats.tx(),
-            gc: gcroots.tx(),
+            gc,
             abort: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -105,13 +106,14 @@ impl ProcessingContext {
 /// Creates threads, starts parallel scanning and collects results.
 pub fn spawn_threads(app: &App, gcroots: &mut dyn Register) -> Result<Statistics> {
     let mut stats = app.statistics();
+    let (gc_tx, gc_rx) = channel::<StorePaths>();
     let mut cache = crossbeam::scope(|sc| -> Result<Arc<Cache>> {
-        let pctx = ProcessingContext::create(app, &mut stats, gcroots)?;
+        let pctx = ProcessingContext::create(app, &mut stats, gc_tx)?;
         let walker = app.walker()?.build_parallel();
         info!("{}: Scouting {}", crate_name!(), p2s(&app.opt.startdir));
         let walk_hdl = sc.spawn(|_| pctx.walk(walker));
         sc.spawn(|_| stats.receive_loop());
-        gcroots.register_loop();
+        gcroots.register_loop(gc_rx);
         walk_hdl.join().expect("subthread panic")
     })
     .expect("thread panic")?;
@@ -140,6 +142,7 @@ mod tests {
     use std::io::Write;
     use std::os::unix::fs::{symlink, PermissionsExt};
     use std::path::{Path, PathBuf};
+    use std::sync::mpsc::channel;
     use tempdir::TempDir;
     use users::mock::{MockUsers, User};
     use users::os::unix::UserExt;
@@ -291,8 +294,8 @@ mod tests {
     #[test]
     fn should_not_cross_devices() {
         let app = app("dir1");
-        let mut pctx =
-            ProcessingContext::create(&app, &mut app.statistics(), &mut fake_gc()).unwrap();
+        let (tx, _) = channel::<StorePaths>();
+        let mut pctx = ProcessingContext::create(&app, &mut app.statistics(), tx).unwrap();
         pctx.startdev = 0;
         let dent = app.walker().unwrap().build().next().unwrap().unwrap();
         assert_eq!(WalkState::Skip, pctx.scan_entry(dent).unwrap());

@@ -29,21 +29,17 @@ pub struct GCRoots {
     todo: Vec<StorePaths>,
     seen: HashSet<PathBuf>,
     output: Output,
-    rx: Option<GCRootsRx>,
 }
 
 /// IPC endpoint for garbage collection roots registry
 pub trait Register {
     /// Receives stream of store paths via the `rx` channel. Returns on channel close.
-    fn register_loop(&mut self);
+    fn register_loop(&mut self, rx: GCRootsRx);
 
     /// Creates links for all registered store paths and cleans up unused ones.
     fn commit(&mut self, _ctx: &ExecutionContext) -> Result<()> {
         Ok(())
     }
-
-    /// Returns sending end of the GCRoot channel.
-    fn tx(&mut self) -> GCRootsTx;
 }
 
 impl GCRoots {
@@ -70,11 +66,10 @@ impl GCRoots {
 }
 
 impl Register for GCRoots {
-    fn register_loop(&mut self) {
-        if let Some(rx) = self.rx.take() {
-            for sp in rx {
-                self.todo.push(sp)
-            }
+    fn register_loop(&mut self, rx: GCRootsRx) {
+        for sp in rx {
+            self.output.print_store_paths(&sp);
+            self.todo.push(sp)
         }
     }
 
@@ -85,10 +80,7 @@ impl Register for GCRoots {
             let registered = self
                 .todo
                 .iter()
-                .map(|sp| {
-                    self.output.print_store_paths(&sp);
-                    worker.register(sp)
-                })
+                .map(|sp| worker.register(sp))
                 .sum::<Result<usize>>()?;
             info!(
                 "{} references in {}",
@@ -104,12 +96,6 @@ impl Register for GCRoots {
             }
             Ok(())
         })
-    }
-
-    fn tx(&mut self) -> GCRootsTx {
-        let (tx, rx) = mpsc::channel::<StorePaths>();
-        self.rx = Some(rx);
-        tx
     }
 }
 
@@ -235,18 +221,10 @@ impl NullGCRoots {
 }
 
 impl Register for NullGCRoots {
-    fn register_loop(&mut self) {
-        if let Some(ref rx) = self.rx.take() {
-            for storepaths in rx {
-                self.output.print_store_paths(&storepaths);
-            }
+    fn register_loop(&mut self, rx: GCRootsRx) {
+        for storepaths in rx {
+            self.output.print_store_paths(&storepaths);
         }
-    }
-
-    fn tx(&mut self) -> GCRootsTx {
-        let (tx, rx) = mpsc::channel::<StorePaths>();
-        self.rx = Some(rx);
-        tx
     }
 }
 
@@ -254,7 +232,9 @@ impl Register for NullGCRoots {
 pub mod tests {
     use super::*;
     use crate::tests::FIXTURES;
+
     use std::fs::read_dir;
+    use std::sync::mpsc::channel;
     use tempdir::TempDir;
 
     fn _gcroots() -> (TempDir, GCRoots) {
@@ -341,7 +321,7 @@ pub mod tests {
     #[test]
     fn should_create_links_no_earlier_than_in_commit() -> Result<()> {
         let (td, mut gc) = _gcroots();
-        let tx = gc.tx();
+        let (tx, rx) = channel::<StorePaths>();
         let dent = ignore::Walk::new(td.path()).into_iter().next().unwrap()?;
         tx.send(StorePaths::new(
             dent,
@@ -363,7 +343,7 @@ pub mod tests {
                 .collect()
         };
 
-        gc.register_loop();
+        gc.register_loop(rx);
         assert!(
             contents(td.path()).is_empty(),
             "register_loop() should not create links"
@@ -407,22 +387,14 @@ pub mod tests {
     }
 
     impl Register for FakeGCRoots {
-        fn register_loop(&mut self) {
-            if let Some(rx) = self.rx.take() {
-                for storepaths in rx {
-                    for r in storepaths.refs() {
-                        let relpath = storepaths.path().strip_prefix(&self.prefix).unwrap();
-                        self.registered
-                            .push(format!("{}|{}", relpath.display(), r.display()));
-                    }
+        fn register_loop(&mut self, rx: GCRootsRx) {
+            for storepaths in rx {
+                for r in storepaths.refs() {
+                    let relpath = storepaths.path().strip_prefix(&self.prefix).unwrap();
+                    self.registered
+                        .push(format!("{}|{}", relpath.display(), r.display()));
                 }
             }
-        }
-
-        fn tx(&mut self) -> GCRootsTx {
-            let (tx, rx) = mpsc::channel::<StorePaths>();
-            self.rx = Some(rx);
-            tx
         }
     }
 }
