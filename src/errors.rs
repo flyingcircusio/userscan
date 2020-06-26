@@ -39,6 +39,8 @@ pub enum UErr {
     SaveCache(PathBuf, #[source] cachemap::Error),
     #[error("I/O error")]
     IO(#[from] io::Error),
+    #[error("Operating system error")]
+    Nix(#[from] nix::Error),
 }
 
 pub type Result<T, E = UErr> = ::std::result::Result<T, E>;

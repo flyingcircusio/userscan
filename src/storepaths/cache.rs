@@ -7,9 +7,9 @@ use super::{Lookup, StorePaths};
 use crate::cachemap::*;
 use crate::errors::*;
 use crate::output::p2s;
+use crate::system::ExecutionContext;
 use colored::Colorize;
 use ignore::DirEntry;
-use nix::unistd::{geteuid, getuid};
 use std::fs;
 use std::os::unix::prelude::*;
 use std::path::{Path, PathBuf};
@@ -35,51 +35,45 @@ impl Cache {
         }
     }
 
-    pub fn open<P: AsRef<Path>>(mut self, path: P) -> Result<Self> {
+    pub fn open<P: AsRef<Path>>(mut self, path: P, ctx: &ExecutionContext) -> Result<Self> {
         self.filename = path.as_ref().to_path_buf();
         info!("Loading cache {}", p2s(&self.filename));
-        assert!(
-            geteuid() == getuid(),
-            "Refusing to open cache with elevated privileges"
-        );
-        if let Some(p) = path.as_ref().parent() {
-            fs::create_dir_all(p).map_err(|e| UErr::Create(p.to_owned(), e))?;
-        }
-        let mut cachefile =
-            open_locked(&path).map_err(|e| UErr::LoadCache(self.filename.clone(), e))?;
-        if cachefile.metadata().map_err(UErr::from)?.len() > 0 {
-            let map = CacheMap::load(&mut cachefile, &self.filename)
-                .map_err(|e| UErr::LoadCache(self.filename.clone(), e))?;
-            debug!("loaded {} entries from cache", map.len());
-            self.map = RwLock::new(map);
-            self.dirty = AtomicBool::new(false);
-        } else {
-            debug!("creating new cache {}", p2s(&path));
-            self.map.write().expect("tainted lock").clear();
-            self.dirty = AtomicBool::new(true);
-        }
-        self.file = Some(cachefile);
+        self.file = ctx.with_dropped_privileges::<_, UErr, _>(|| {
+            if let Some(p) = path.as_ref().parent() {
+                fs::create_dir_all(p).map_err(|e| UErr::Create(p.to_owned(), e))?;
+            }
+            let mut cachefile =
+                open_locked(&path).map_err(|e| UErr::LoadCache(self.filename.clone(), e))?;
+            if cachefile.metadata().map_err(UErr::from)?.len() > 0 {
+                let map = CacheMap::load(&mut cachefile, &self.filename)
+                    .map_err(|e| UErr::LoadCache(self.filename.clone(), e))?;
+                debug!("loaded {} entries from cache", map.len());
+                self.map = RwLock::new(map);
+                self.dirty = AtomicBool::new(false);
+            } else {
+                debug!("creating new cache {}", p2s(&path));
+                self.map.write().expect("tainted lock").clear();
+                self.dirty = AtomicBool::new(true);
+            }
+            Ok(Some(cachefile))
+        })?;
         Ok(self)
     }
 
-    pub fn commit(&mut self) -> Result<()> {
+    pub fn commit(&mut self, ctx: &ExecutionContext) -> Result<()> {
         if let Some(ref mut file) = self.file {
             if !self.dirty.compare_and_swap(true, false, Ordering::SeqCst) {
                 return Ok(());
             }
-            assert!(
-                geteuid() == getuid(),
-                "Refusing to write cache with elevated privileges"
-            );
+            ctx.drop_privileges()?;
             let mut map = self.map.write().expect("tainted lock");
             map.retain(|_, ref mut v| v.used);
             debug!("writing {} entries to cache", map.len());
             map.save(file)
-                .map_err(|e| UErr::SaveCache(self.filename.clone(), e))
-        } else {
-            // don't do anything if there is no cache file except for evicting unused elements
-            Ok(())
+                .map_err(|e| UErr::SaveCache(self.filename.clone(), e))?;
+            ctx.regain_privileges()?;
         }
+        Ok(())
     }
 
     fn get(&self, dent: &DirEntry) -> Option<(Vec<PathBuf>, fs::Metadata)> {
@@ -252,7 +246,9 @@ mod tests {
         let td = TempDir::new("load_save_cache").unwrap();
         let cache_file = td.path().join("cache.mp");
         fs::copy(FIXTURES.join("cache.mp"), &cache_file).unwrap();
-        let mut c = Cache::new(None).open(&cache_file).unwrap();
+        let mut c = Cache::new(None)
+            .open(&cache_file, &ExecutionContext::new())
+            .unwrap();
         assert_eq!(12, c.len());
         assert!(!c.dirty.load(Ordering::SeqCst));
         for ref cl in c.map.read().unwrap().values() {
@@ -273,7 +269,7 @@ mod tests {
                 .len()
         );
 
-        c.commit().unwrap();
+        c.commit(&ExecutionContext::new()).unwrap();
         assert_eq!(1, c.len());
         let cache_len = fs::metadata(&cache_file).unwrap().len();
         assert!(cache_len > 60);

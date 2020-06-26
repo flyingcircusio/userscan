@@ -1,6 +1,6 @@
 [package]
 name = "fc-userscan"
-version = "0.4.5"
+version = "0.4.6-dev"
 authors = ["Christian Kauhaus <kc@flyingcircus.io>"]
 description = """\
 Scans files for Nix store references and registers them with the Nix garbage collector.
@@ -30,9 +30,9 @@ nix = "0.17"
 num_cpus = "1"
 probes = "0.3"
 regex = "1"
+rmp = "0.8"
 rmp-serde = "0.14"
-serde = "1.0"
-serde_derive = "1.0"
+serde = { version = "1", features = ["derive"] }
 structopt = "0.3"
 thiserror = "1"
 twoway = "0.1"

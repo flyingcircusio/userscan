@@ -2,6 +2,7 @@ use super::STORE;
 use crate::errors::*;
 use crate::output::{p2s, Output};
 use crate::storepaths::StorePaths;
+use crate::system::ExecutionContext;
 
 use colored::Colorize;
 use ignore::{self, DirEntry, WalkBuilder};
@@ -29,19 +30,19 @@ pub struct GCRoots {
     prefix: PathBuf, // /nix/var/nix/gcroots/profiles/per-user/$USER
     topdir: PathBuf, // e.g., $PREFIX/srv/www if /srv/www was scanned
     cwd: PathBuf,    // current dir when the scan was started
+    todo: Vec<StorePaths>,
     seen: HashSet<PathBuf>,
     output: Output,
     rx: Option<GCRootsRx>,
-    registered: usize,
 }
 
 /// IPC endpoint for garbage collection roots registry
 pub trait Register {
     /// Receives stream of store paths via the `rx` channel. Returns on channel close.
-    fn register_loop(&mut self) -> Result<()>;
+    fn register_loop(&mut self);
 
     /// Creates links for all registered store paths and cleans up unused ones.
-    fn commit(&self) -> Result<()> {
+    fn commit(&mut self, _ctx: &ExecutionContext) -> Result<()> {
         Ok(())
     }
 
@@ -115,8 +116,8 @@ impl GCRoots {
     }
 
     /// Registers all Nix store paths with the garbage collector.
-    fn register(&mut self, sp: &StorePaths) -> Result<usize> {
-        self.output.print_store_paths(sp);
+    fn register(&mut self, sp: StorePaths) -> Result<usize> {
+        self.output.print_store_paths(&sp);
         let dir = self.gc_link_dir(sp.path());
         sp.iter_refs().map(|p| self.link(dir.as_path(), p)).sum()
     }
@@ -160,35 +161,36 @@ impl GCRoots {
 }
 
 impl Register for GCRoots {
-    fn register_loop(&mut self) -> Result<()> {
-        match self.rx.take() {
-            Some(rx) => {
-                self.registered = rx
-                    .iter()
-                    //.map(|_| Ok(1))
-                    .map(|sp| self.register(&sp)) // XXX
-                    .sum::<Result<usize>>()?;
-                Ok(())
+    fn register_loop(&mut self) {
+        if let Some(rx) = self.rx.take() {
+            for sp in rx {
+                self.todo.push(sp)
             }
-            None => Ok(()),
         }
     }
 
-    fn commit(&self) -> Result<()> {
-        let cleaned = self.cleanup()?;
-        info!(
-            "{} references in {}",
-            self.seen.len().to_string().cyan(),
-            p2s(&self.topdir)
-        );
-        if self.registered > 0 || cleaned > 0 {
+    fn commit(&mut self, ctx: &ExecutionContext) -> Result<()> {
+        ctx.with_dropped_privileges(|| {
+            let cleaned = self.cleanup()?;
+            let todo = self.todo.split_off(0);
+            let registered = todo
+                .into_iter()
+                .map(|sp| self.register(sp))
+                .sum::<Result<usize>>()?;
             info!(
-                "newly registered: {}, cleaned: {}",
-                self.registered.to_string().green(),
-                cleaned.to_string().purple()
+                "{} references in {}",
+                self.seen.len().to_string().cyan(),
+                p2s(&self.topdir)
             );
-        }
-        Ok(())
+            if registered > 0 || cleaned > 0 {
+                info!(
+                    "newly registered: {}, cleaned: {}",
+                    registered.to_string().green(),
+                    cleaned.to_string().purple()
+                );
+            }
+            Ok(())
+        })
     }
 
     fn tx(&mut self) -> GCRootsTx {
@@ -214,13 +216,12 @@ impl NullGCRoots {
 }
 
 impl Register for NullGCRoots {
-    fn register_loop(&mut self) -> Result<()> {
+    fn register_loop(&mut self) {
         if let Some(ref rx) = self.rx.take() {
             for storepaths in rx {
                 self.output.print_store_paths(&storepaths);
             }
         }
-        Ok(())
     }
 
     fn tx(&mut self) -> GCRootsTx {
@@ -234,6 +235,7 @@ impl Register for NullGCRoots {
 pub mod tests {
     use super::*;
     use crate::tests::FIXTURES;
+    use std::fs::read_dir;
     use tempdir::TempDir;
 
     fn _gcroots() -> (TempDir, GCRoots) {
@@ -308,7 +310,48 @@ pub mod tests {
         assert_eq!(gc.cleanup().expect("unexpected cleanup failure"), 0);
     }
 
-    // XXX missing: test that commit() actually creates symlinks
+    #[test]
+    fn should_create_links_no_earlier_than_in_commit() -> Result<()> {
+        let (td, mut gc) = _gcroots();
+        let tx = gc.tx();
+        let dent = ignore::Walk::new(td.path()).into_iter().next().unwrap()?;
+        tx.send(StorePaths::new(
+            dent,
+            vec![
+                PathBuf::from("11111111111111111111111111111111-foo"),
+                PathBuf::from("22222222222222222222222222222222-bar"),
+            ],
+            1000,
+            None,
+        ))
+        .unwrap();
+        drop(tx);
+
+        let contents = |base: &Path| -> Vec<PathBuf> {
+            read_dir(base)
+                .expect("base dir missing")
+                .into_iter()
+                .map(|e| e.unwrap().path())
+                .collect()
+        };
+
+        gc.register_loop();
+        assert!(
+            contents(td.path()).is_empty(),
+            "register_loop() should not create links"
+        );
+
+        gc.commit(&ExecutionContext::new())?;
+        let base = td.path().join("tmp");
+        assert_eq!(
+            contents(&base),
+            &[
+                PathBuf::from(base.join("11111111111111111111111111111111")),
+                PathBuf::from(base.join("22222222222222222222222222222222")),
+            ],
+        );
+        Ok(())
+    }
 
     /*
      * passive GCRoots consumer to test walker/scanner
@@ -336,19 +379,15 @@ pub mod tests {
     }
 
     impl Register for FakeGCRoots {
-        fn register_loop(&mut self) -> Result<()> {
-            match self.rx.take() {
-                Some(ref rx) => {
-                    for storepaths in rx {
-                        for r in storepaths.refs() {
-                            let relpath = storepaths.path().strip_prefix(&self.prefix).unwrap();
-                            self.registered
-                                .push(format!("{}|{}", relpath.display(), r.display()));
-                        }
+        fn register_loop(&mut self) {
+            if let Some(rx) = self.rx.take() {
+                for storepaths in rx {
+                    for r in storepaths.refs() {
+                        let relpath = storepaths.path().strip_prefix(&self.prefix).unwrap();
+                        self.registered
+                            .push(format!("{}|{}", relpath.display(), r.display()));
                     }
-                    Ok(())
                 }
-                None => Ok(()),
             }
         }
 

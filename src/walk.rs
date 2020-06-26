@@ -10,7 +10,6 @@ use crate::App;
 
 use anyhow::{Context, Result};
 use ignore::{self, DirEntry, WalkParallel, WalkState};
-use nix::unistd::seteuid;
 use std::io::{self, ErrorKind};
 use std::os::unix::fs::MetadataExt;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -112,18 +111,16 @@ pub fn spawn_threads(app: &App, gcroots: &mut dyn Register) -> Result<Statistics
         info!("{}: Scouting {}", crate_name!(), p2s(&app.opt.startdir));
         let walk_hdl = sc.spawn(|_| pctx.walk(walker));
         sc.spawn(|_| stats.receive_loop());
-        gcroots.register_loop()?;
+        gcroots.register_loop();
         walk_hdl.join().expect("subthread panic")
     })
     .expect("thread panic")?;
     if app.register {
-        gcroots.commit()?;
-        // no privileges needed from this point on
-        seteuid(app.uid)?;
+        gcroots.commit(&app.exectx)?;
         // don't touch cache if in no-register mode
         Arc::get_mut(&mut cache)
             .expect("dangling cache references (all threads terminated?)")
-            .commit()?;
+            .commit(&app.exectx)?;
         cache.log_statistics();
     }
     stats.log_summary(&app.opt.startdir);

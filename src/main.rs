@@ -6,8 +6,6 @@ extern crate clap;
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
-#[macro_use]
-extern crate serde_derive;
 
 mod cachemap;
 mod errors;
@@ -16,6 +14,7 @@ mod registry;
 mod scan;
 mod statistics;
 mod storepaths;
+mod system;
 #[cfg(test)]
 mod tests;
 mod walk;
@@ -25,7 +24,7 @@ use bytesize::ByteSize;
 use errors::UErr;
 use ignore::overrides::OverrideBuilder;
 use ignore::WalkBuilder;
-use nix::unistd::{geteuid, getuid, seteuid, Uid};
+use nix::unistd::{geteuid, getuid};
 use output::{p2s, Output};
 use registry::{GCRoots, NullGCRoots, Register};
 use statistics::Statistics;
@@ -54,27 +53,13 @@ fn add_dotexclude<U: users::Users>(mut wb: WalkBuilder, u: &U) -> Result<WalkBui
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct App {
     opt: Opt,
     output: Output,
     overrides: Vec<String>,
     register: bool,
-    uid: Uid,
-    euid: Uid,
-}
-
-impl Default for App {
-    fn default() -> Self {
-        Self {
-            opt: Opt::default(),
-            output: Output::default(),
-            overrides: Vec::default(),
-            register: false,
-            uid: getuid(),
-            euid: geteuid(),
-        }
-    }
+    exectx: system::ExecutionContext,
 }
 
 impl App {
@@ -131,16 +116,12 @@ impl App {
         }
     }
 
-    fn cache(&self) -> Result<Cache> {
-        match self.opt.cache {
-            Some(ref f) => {
-                // drop privileges before opening the cache
-                seteuid(self.uid)?;
-                let cache = Cache::new(self.opt.cache_limit).open(f)?;
-                seteuid(self.euid)?;
-                Ok(cache)
-            }
-            None => Ok(Cache::new(self.opt.cache_limit)),
+    fn cache(&self) -> Result<Cache, errors::UErr> {
+        let cache = Cache::new(self.opt.cache_limit);
+        if let Some(ref f) = self.opt.cache {
+            cache.open(f, &self.exectx)
+        } else {
+            Ok(cache)
         }
     }
 
@@ -168,6 +149,7 @@ impl App {
     /// Main entry point
     pub fn run(&self) -> Result<i32> {
         self.output.log_init();
+        debug!("uid: {}, euid: {}", getuid(), geteuid());
         match walk::spawn_threads(self, self.gcroots()?.deref_mut())?.softerrors() {
             0 => Ok(0),
             _ => Ok(1),

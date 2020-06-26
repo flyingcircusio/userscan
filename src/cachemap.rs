@@ -5,6 +5,7 @@ use fnv::FnvHashMap;
 use minilzo;
 use nix::fcntl;
 use rmp_serde::{decode, encode};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
 use std::io::prelude::*;
