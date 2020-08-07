@@ -1,6 +1,6 @@
 [package]
 name = "fc-userscan"
-version = "0.4.6-dev"
+version = "0.4.6"
 authors = ["Christian Kauhaus <kc@flyingcircus.io>"]
 description = """\
 Scans files for Nix store references and registers them with the Nix garbage collector.
@@ -43,7 +43,7 @@ zip = "0.5"
 probes = { git = "https://github.com/appsignal/probes-rs", rev = "84d9acfa8e80"}
 
 [dev-dependencies]
-tempdir = "0.3"
+tempfile = "3.1"
 
 [profile.release]
 lto = "thin"

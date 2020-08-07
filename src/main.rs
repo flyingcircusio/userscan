@@ -3,8 +3,6 @@
 #[macro_use]
 extern crate clap;
 #[macro_use]
-extern crate lazy_static;
-#[macro_use]
 extern crate log;
 
 mod cachemap;
@@ -24,6 +22,7 @@ use bytesize::ByteSize;
 use errors::UErr;
 use ignore::overrides::OverrideBuilder;
 use ignore::WalkBuilder;
+use lazy_static::lazy_static;
 use nix::unistd::{geteuid, getuid};
 use output::{p2s, Output};
 use registry::{GCRoots, NullGCRoots, Register};

@@ -7,6 +7,7 @@ use anyhow::Result as AResult;
 use bytesize::ByteSize;
 use ignore::overrides::Override;
 use ignore::{DirEntry, Match};
+use lazy_static::lazy_static;
 use memmap::Mmap;
 use probes::load;
 use regex::bytes::Regex;

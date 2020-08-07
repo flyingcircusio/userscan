@@ -166,13 +166,11 @@ impl Cache {
 
 #[cfg(test)]
 mod tests {
-    extern crate tempdir;
-
-    use self::tempdir::TempDir;
     use super::Lookup::*;
     use super::*;
     use crate::tests::{dent, FIXTURES};
     use std::fs;
+    use tempfile::TempDir;
 
     fn sp_dummy() -> StorePaths {
         let dent = tests::dent("dir2/lftp");
@@ -243,7 +241,7 @@ mod tests {
 
     #[test]
     fn load_save_cache() {
-        let td = TempDir::new("load_save_cache").unwrap();
+        let td = TempDir::new().unwrap();
         let cache_file = td.path().join("cache.mp");
         fs::copy(FIXTURES.join("cache.mp"), &cache_file).unwrap();
         let mut c = Cache::new(None)

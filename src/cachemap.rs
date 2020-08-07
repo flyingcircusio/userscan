@@ -2,7 +2,6 @@
 use crate::output::p2s;
 
 use fnv::FnvHashMap;
-use minilzo;
 use nix::fcntl;
 use rmp_serde::{decode, encode};
 use serde::{Deserialize, Serialize};
@@ -125,10 +124,9 @@ impl DerefMut for CacheMap {
 
 #[cfg(test)]
 mod tests {
-    extern crate tempdir;
-    use self::tempdir::TempDir;
     use super::*;
     use crate::tests::FIXTURES;
+    use tempfile::TempDir;
 
     #[test]
     fn cacheline_should_compare_regardless_of_used_flag() {
@@ -164,7 +162,7 @@ mod tests {
 
     #[test]
     fn save_should_create_file() {
-        let tempdir = TempDir::new("save-cache").expect("failed to create tempdir");
+        let tempdir = TempDir::new().expect("failed to create tempdir");
         let filename = tempdir.path().join("cache");
         {
             let mut f = open_locked(&filename).unwrap();
@@ -175,7 +173,7 @@ mod tests {
 
     #[test]
     fn load_should_decompress_cachefile() {
-        let tempdir = TempDir::new("load-cache").expect("failed to create tempdir");
+        let tempdir = TempDir::new().expect("failed to create tempdir");
         let filename = tempdir.path().join("cache.ok");
         fs::copy(FIXTURES.join("cache.mp"), &filename).unwrap();
         let mut f = open_locked(&filename).unwrap();
@@ -185,7 +183,7 @@ mod tests {
 
     #[test]
     fn load_should_ignore_broken_cachefile() {
-        let tempdir = TempDir::new("load-cache").expect("failed to create tempdir");
+        let tempdir = TempDir::new().expect("failed to create tempdir");
         let filename = tempdir.path().join("cache.truncated");
         fs::copy(FIXTURES.join("cache.mp"), &filename).unwrap();
         let mut f = open_locked(&filename).unwrap();

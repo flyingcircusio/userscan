@@ -43,6 +43,8 @@ pub trait Register {
 }
 
 impl GCRoots {
+    /// Creates Nix garbage collector handler, with `peruser` as user-level gc root (usually
+    /// /nix/var/nix/gcroots/per-user) and `startdir` as initial scan dir (e.g., /home/user).
     pub fn new<P: AsRef<Path>>(peruser: &str, startdir: P, output: &Output) -> Result<Self> {
         let user = match get_effective_username() {
             Some(u) => u,
@@ -233,12 +235,13 @@ pub mod tests {
     use super::*;
     use crate::tests::FIXTURES;
 
+    use std::env;
     use std::fs::read_dir;
     use std::sync::mpsc::channel;
-    use tempdir::TempDir;
+    use tempfile::TempDir;
 
     fn _gcroots() -> (TempDir, GCRoots) {
-        let tempdir = TempDir::new("gcroots").expect("failed to create gcroots tempdir");
+        let tempdir = TempDir::new().expect("failed to create gcroots tempdir");
         let mut gc = GCRoots::new("/", Path::new("/"), &Output::default()).unwrap();
         gc.prefix = tempdir.path().to_owned();
         gc.topdir = PathBuf::from("/home/user/www");
@@ -259,7 +262,7 @@ pub mod tests {
 
     #[test]
     fn linkdir() {
-        let td = TempDir::new("linkdir").unwrap();
+        let td = TempDir::new().unwrap();
         let w = _worker(&td);
         assert_eq!(td.path().join("home/user"), w.gc_link_dir("file2"));
         assert_eq!(
@@ -271,7 +274,7 @@ pub mod tests {
 
     #[test]
     fn should_create_link() {
-        let td = TempDir::new("createlink").unwrap();
+        let td = TempDir::new().unwrap();
         let mut w = _worker(&td);
         let storepath = Path::new("gmy86w4020xzjw9s8qzzz0bgx8ldkhhk-e34kjk");
         let expected = td.path().join("gmy86w4020xzjw9s8qzzz0bgx8ldkhhk");
@@ -284,7 +287,7 @@ pub mod tests {
 
     #[test]
     fn create_link_should_create_dir() {
-        let td = TempDir::new("createdir").unwrap();
+        let td = TempDir::new().unwrap();
         let mut w = _worker(&td);
         assert!(fs::metadata(td.path().join("d1")).is_err());
         assert_eq!(
@@ -299,7 +302,7 @@ pub mod tests {
 
     #[test]
     fn create_link_should_correct_existing_link() {
-        let td = TempDir::new("correctlink").unwrap();
+        let td = TempDir::new().unwrap();
         let mut w = _worker(&td);
         let link = td.path().join("f0vdg3cb0005ksjb0fd5qs6f56zg2qs5");
         symlink("changeme", &link).unwrap();
@@ -313,7 +316,7 @@ pub mod tests {
 
     #[test]
     fn cleanup_nonexistent_dir_should_succeed() {
-        let td = TempDir::new("cleanup").unwrap();
+        let td = TempDir::new().unwrap();
         let w = _worker(&td);
         assert_eq!(w.cleanup(&td.path().join("no/such/dir")).unwrap(), 0);
     }
@@ -337,7 +340,7 @@ pub mod tests {
 
         let contents = |base: &Path| -> Vec<PathBuf> {
             read_dir(base)
-                .expect("base dir missing")
+                .expect(&format!("failed to read_dir() {}", base.display()))
                 .into_iter()
                 .map(|e| e.unwrap().path())
                 .collect()
@@ -350,7 +353,11 @@ pub mod tests {
         );
 
         gc.commit(&ExecutionContext::new())?;
-        let base = td.path().join("tmp");
+        let base = td.path().join(
+            env::temp_dir()
+                .strip_prefix("/")
+                .expect("env::temp_dir does not start with '/'"),
+        );
         assert_eq!(
             contents(&base),
             &[

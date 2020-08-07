@@ -1,5 +1,3 @@
-extern crate crossbeam;
-
 use crate::errors::UErr;
 use crate::output::p2s;
 use crate::registry::{GCRootsTx, Register};
@@ -143,7 +141,7 @@ mod tests {
     use std::os::unix::fs::{symlink, PermissionsExt};
     use std::path::{Path, PathBuf};
     use std::sync::mpsc::channel;
-    use tempdir::TempDir;
+    use tempfile::TempDir;
     use users::mock::{MockUsers, User};
     use users::os::unix::UserExt;
 
@@ -179,7 +177,7 @@ mod tests {
         where
             F: FnOnce(&Path),
         {
-            let temp = TempDir::new("walk_test").unwrap();
+            let temp = TempDir::new().unwrap();
             setup(&temp.path());
             Self { temp }
         }
@@ -278,7 +276,7 @@ mod tests {
 
     #[test]
     fn walk_infiniteloop() {
-        let t = TempDir::new("test_infinite_loop").unwrap();
+        let t = TempDir::new().unwrap();
         let p = t.path();
         create_dir(p.join("dir1")).unwrap();
         create_dir(p.join("dir2")).unwrap();
@@ -326,7 +324,7 @@ mod tests {
 
     #[test]
     fn walk_should_obey_excludefile() {
-        let t = TempDir::new("test_excludefile").unwrap();
+        let t = TempDir::new().unwrap();
         let p = t.path();
 
         let mut users = MockUsers::with_current_uid(100);

@@ -1,7 +1,5 @@
-extern crate nix;
-
-use self::nix::unistd::chdir;
 use super::*;
+use nix::unistd::chdir;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
