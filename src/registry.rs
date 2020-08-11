@@ -16,7 +16,7 @@ use std::os::unix::prelude::*;
 use std::path::{Path, PathBuf};
 use std::result;
 use std::sync::mpsc;
-use users::get_effective_username;
+use users::get_current_username;
 
 pub type GCRootsTx = mpsc::Sender<StorePaths>;
 pub type GCRootsRx = mpsc::Receiver<StorePaths>;
@@ -46,7 +46,7 @@ impl GCRoots {
     /// Creates Nix garbage collector handler, with `peruser` as user-level gc root (usually
     /// /nix/var/nix/gcroots/per-user) and `startdir` as initial scan dir (e.g., /home/user).
     pub fn new<P: AsRef<Path>>(peruser: &str, startdir: P, output: &Output) -> Result<Self> {
-        let user = match get_effective_username() {
+        let user = match get_current_username() {
             Some(u) => u,
             None => return Err(UErr::WhoAmI),
         };
