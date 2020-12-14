@@ -28,7 +28,7 @@ memmap = "0.7"
 minilzo = "0.2"
 nix = "0.18"
 num_cpus = "1"
-probes = "0.3"
+probes = "0.4"
 regex = "1"
 rmp = "0.8"
 rmp-serde = "0.14"
@@ -38,9 +38,6 @@ thiserror = "1"
 twoway = "0.1"
 users = "0.10"
 zip = "0.5"
-
-[patch.crates-io]
-probes = { git = "https://github.com/appsignal/probes-rs", rev = "84d9acfa8e80"}
 
 [dev-dependencies]
 tempfile = "3.1"

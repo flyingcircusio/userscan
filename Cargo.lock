@@ -500,8 +500,9 @@ checksum = "237a5ed80e274dbc66f86bd59c1e25edc039660be53194b5fe0a482e0f2612ea"
 
 [[package]]
 name = "probes"
-version = "0.3.0"
-source = "git+https://github.com/appsignal/probes-rs?rev=84d9acfa8e80#84d9acfa8e80b9aca515da3d933f80f0fd5df909"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4bb02a28631f195f482c19529ec82bec8e4ffa2d96159e67eb1ae9f5c5c902d8"
 dependencies = [
  "libc",
  "time",
