@@ -67,7 +67,7 @@ location, the registration will be cleaned up by the next run.
 To conveniently build setuid executables, install `cargo-make` and run `cargo
 make suid`.
 
-I'll happily accect pull requests at the [GitHub
+I'll happily accept pull requests at the [GitHub
 repository](https://github.com/flyingcircusio/userscan).
 Please write tests if feasible.
 
