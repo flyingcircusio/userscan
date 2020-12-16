@@ -1,3 +1,10 @@
+2020-12-16  Christian Kauhaus <kc@flyingcircus.io>
+
+	* Adapt to new permissions in /nix/var/nix/gcroots/per-user in NixOS
+	20.09.
+	* Silently ignore unknown file types like named pipes.
+	* Release 0.4.8
+
 2020-06-10  Christian Kauhaus <kc@flyingcircus.io>
 
 	* Fix broken compile

@@ -3,12 +3,12 @@ use std::error::Error;
 
 #[derive(Debug, Clone)]
 pub struct ExecutionContext {
-    is_suid: bool,
-    is_sgid: bool,
-    uid: Uid,
-    euid: Uid,
-    gid: Gid,
-    egid: Gid,
+    pub is_suid: bool,
+    pub is_sgid: bool,
+    pub uid: Uid,
+    pub euid: Uid,
+    pub gid: Gid,
+    pub egid: Gid,
 }
 
 impl Default for ExecutionContext {

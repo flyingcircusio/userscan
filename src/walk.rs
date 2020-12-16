@@ -76,6 +76,9 @@ impl ProcessingContext {
                             error!("Traversal error: {:#}", &err);
                             pctx.abort.store(true, Ordering::SeqCst);
                             return WalkState::Quit;
+                        } else if let Some(UErr::FiletypeUnknown) = err.downcast_ref::<UErr>() {
+                            // ignore & continue
+                            return WalkState::Continue;
                         } else if let Some(e) = err.downcast_ref::<ignore::Error>() {
                             error!("Traversal failure: {:#}", &e);
                             pctx.abort.store(true, Ordering::SeqCst);

@@ -76,6 +76,11 @@ impl Register for GCRoots {
     }
 
     fn commit(&mut self, ctx: &ExecutionContext) -> Result<()> {
+        // Create `prefix` (/nix/var/nix/gcroots/per-user/$USER) on a best-effort basis before
+        // dropping privileges. Failure may be or may be not a problem here, so defer error
+        // handling to RegistryWorker::link later on.
+        fs::create_dir(&self.prefix).ok();
+        nix::unistd::chown(&self.prefix, Some(ctx.uid), Some(ctx.gid)).ok();
         ctx.with_dropped_privileges(|| {
             let mut worker = RegistryWorker::new(&self.prefix, &self.cwd);
             let cleaned = worker.cleanup(&self.topdir)?;
@@ -339,11 +344,13 @@ pub mod tests {
         drop(tx);
 
         let contents = |base: &Path| -> Vec<PathBuf> {
-            read_dir(base)
+            let mut paths = read_dir(base)
                 .expect(&format!("failed to read_dir() {}", base.display()))
                 .into_iter()
                 .map(|e| e.unwrap().path())
-                .collect()
+                .collect::<Vec<_>>();
+            paths.sort();
+            paths
         };
 
         gc.register_loop(rx);

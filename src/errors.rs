@@ -13,8 +13,8 @@ pub enum UErr {
     DentNoMetadata(PathBuf),
     #[error("Cache limit {0} exceeded")]
     CacheFull(usize),
-    #[error("File '{0}' has an unknown file type - don't know how to handle that")]
-    FiletypeUnknown(PathBuf),
+    #[error("File has an unknown file type - don't know how to handle that")]
+    FiletypeUnknown,
     #[error("Failed to locate UID {0} in passwd database")]
     UnknownUser(uid_t),
     #[error("Failed to unpack ZIP archive '{0}': {1}")]

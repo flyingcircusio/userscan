@@ -193,7 +193,7 @@ impl Scanner {
             }
         }
         // fall-through: no idea how to handle this DirEntry
-        Err(UErr::FiletypeUnknown(dent.path().to_owned()).into())
+        Err(UErr::FiletypeUnknown.into())
     }
 
     fn pause_for_load(&self) {
