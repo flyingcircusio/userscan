@@ -1,7 +1,7 @@
 [package]
 name = "fc-userscan"
-version = "0.4.8"
-authors = ["Christian Kauhaus <kc@flyingcircus.io>"]
+version = "0.4.9"
+authors = ["Christian Kauhaus <kc@flyingcircus.io>", "Christian Theune <ct@flyingcircus.io>"]
 description = """\
 Scans files for Nix store references and registers them with the Nix garbage collector.
 """
