@@ -79,16 +79,20 @@ impl ProcessingContext {
                         } else if let Some(UErr::FiletypeUnknown) = err.downcast_ref::<UErr>() {
                             // ignore & continue
                             return WalkState::Continue;
-                        } else if let Some(e) = err.downcast_ref::<ignore::Error>() {
-                            error!("Traversal failure: {:#}", &e);
-                            pctx.abort.store(true, Ordering::SeqCst);
-                            return WalkState::Quit;
                         } else if let Some(e) = err.downcast_ref::<io::Error>() {
                             if e.kind() == ErrorKind::PermissionDenied {
                                 error!("I/O error: {:#}", &err);
                                 pctx.abort.store(true, Ordering::SeqCst);
                                 return WalkState::Quit;
                             }
+                            else if e.kind() == ErrorKind::NotFound {
+                                // ignore & continue
+                                return WalkState::Continue;
+                            }
+                        } else if let Some(e) = err.downcast_ref::<ignore::Error>() {
+                            error!("Traversal failure: {:#}", &e);
+                            pctx.abort.store(true, Ordering::SeqCst);
+                            return WalkState::Quit;
                         }
                         warn!("{:#}", &err);
                         pctx.stats.send(StatsMsg::SoftError).unwrap();
@@ -205,6 +209,7 @@ mod tests {
     fn walk_fixture_dir1() {
         let mut gcroots = fake_gc();
         let stats = spawn_threads(&app("dir1"), &mut gcroots).unwrap();
+        dbg!(&gcroots.registered);
         assert_eq_vecs(
             gcroots.registered,
             |s| s.to_owned(),
